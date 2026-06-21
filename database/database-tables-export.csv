@@ -1,0 +1,155 @@
+"table_name","column_name","data_type","is_nullable","column_default"
+"activity_types","id","uuid","NO","gen_random_uuid()"
+"activity_types","name","character varying","NO",NULL
+"activity_types","description","text","YES",NULL
+"approval_statuses","id","uuid","NO","gen_random_uuid()"
+"approval_statuses","name","character varying","NO",NULL
+"approval_statuses","description","text","YES",NULL
+"approval_statuses","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"audit_logs","id","uuid","NO","gen_random_uuid()"
+"audit_logs","organization_id","uuid","YES",NULL
+"audit_logs","table_name","character varying","NO",NULL
+"audit_logs","record_id","uuid","NO",NULL
+"audit_logs","action","character varying","NO",NULL
+"audit_logs","old_value","jsonb","YES",NULL
+"audit_logs","new_value","jsonb","YES",NULL
+"audit_logs","changed_by","uuid","YES",NULL
+"audit_logs","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"change_types","id","uuid","NO","gen_random_uuid()"
+"change_types","name","character varying","NO",NULL
+"change_types","description","text","YES",NULL
+"change_types","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"changes","id","uuid","NO","gen_random_uuid()"
+"changes","ticket_id","uuid","NO",NULL
+"changes","implementation_plan","text","YES",NULL
+"changes","rollback_plan","text","YES",NULL
+"changes","planned_start_time","timestamp without time zone","YES",NULL
+"changes","planned_end_time","timestamp without time zone","YES",NULL
+"changes","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"changes","risk_level_id","uuid","YES",NULL
+"changes","approval_status_id","uuid","YES",NULL
+"changes","updated_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"ci_relationship_types","id","uuid","NO","gen_random_uuid()"
+"ci_relationship_types","name","character varying","NO",NULL
+"ci_relationship_types","description","text","YES",NULL
+"ci_types","id","uuid","NO","gen_random_uuid()"
+"ci_types","name","character varying","NO",NULL
+"ci_types","description","text","YES",NULL
+"ci_types","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"configuration_items","id","uuid","NO","gen_random_uuid()"
+"configuration_items","organization_id","uuid","NO",NULL
+"configuration_items","name","character varying","NO",NULL
+"configuration_items","description","text","YES",NULL
+"configuration_items","owner_id","uuid","YES",NULL
+"configuration_items","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"configuration_items","ci_type_id","uuid","YES",NULL
+"configuration_items","status_id","uuid","YES",NULL
+"configuration_items","updated_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"departments","id","uuid","NO","gen_random_uuid()"
+"departments","organization_id","uuid","NO",NULL
+"departments","name","character varying","NO",NULL
+"departments","description","text","YES",NULL
+"departments","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"incidents","id","uuid","NO","gen_random_uuid()"
+"incidents","ticket_id","uuid","NO",NULL
+"incidents","impact","character varying","YES","'LOW'::character varying"
+"incidents","urgency","character varying","YES","'LOW'::character varying"
+"incidents","affected_service","character varying","YES",NULL
+"incidents","resolution_notes","text","YES",NULL
+"incidents","resolved_at","timestamp without time zone","YES",NULL
+"incidents","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"knowledge_articles","id","uuid","NO","gen_random_uuid()"
+"knowledge_articles","organization_id","uuid","NO",NULL
+"knowledge_articles","title","character varying","NO",NULL
+"knowledge_articles","content","text","NO",NULL
+"knowledge_articles","created_by","uuid","NO",NULL
+"knowledge_articles","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"knowledge_articles","updated_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"knowledge_articles","status_id","uuid","YES",NULL
+"knowledge_articles","category_id","uuid","YES",NULL
+"knowledge_categories","id","uuid","NO","gen_random_uuid()"
+"knowledge_categories","name","character varying","NO",NULL
+"knowledge_categories","description","text","YES",NULL
+"knowledge_categories","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"organizations","id","uuid","NO","gen_random_uuid()"
+"organizations","name","character varying","NO",NULL
+"organizations","domain","character varying","YES",NULL
+"organizations","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"priorities","id","uuid","NO","gen_random_uuid()"
+"priorities","name","character varying","NO",NULL
+"priorities","level","integer","NO",NULL
+"priorities","description","text","YES",NULL
+"priorities","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"problem_changes","problem_id","uuid","NO",NULL
+"problem_changes","change_id","uuid","NO",NULL
+"problem_changes","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"problem_incidents","problem_id","uuid","NO",NULL
+"problem_incidents","incident_id","uuid","NO",NULL
+"problem_incidents","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"problems","id","uuid","NO","gen_random_uuid()"
+"problems","ticket_id","uuid","NO",NULL
+"problems","root_cause","text","YES",NULL
+"problems","workaround","text","YES",NULL
+"problems","permanent_solution","text","YES",NULL
+"problems","known_error","boolean","YES","false"
+"problems","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"problems","updated_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"risk_levels","id","uuid","NO","gen_random_uuid()"
+"risk_levels","name","character varying","NO",NULL
+"risk_levels","level","integer","NO",NULL
+"risk_levels","description","text","YES",NULL
+"risk_levels","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"roles","id","uuid","NO","gen_random_uuid()"
+"roles","name","character varying","NO",NULL
+"roles","description","text","YES",NULL
+"roles","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"service_requests","id","uuid","NO","gen_random_uuid()"
+"service_requests","ticket_id","uuid","NO",NULL
+"service_requests","requested_for","uuid","NO",NULL
+"service_requests","approval_status","character varying","YES","'PENDING'::character varying"
+"service_requests","fulfillment_notes","text","YES",NULL
+"service_requests","completed_at","timestamp without time zone","YES",NULL
+"service_requests","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"service_requests","approval_status_id","uuid","YES",NULL
+"statuses","id","uuid","NO","gen_random_uuid()"
+"statuses","module","character varying","NO",NULL
+"statuses","name","character varying","NO",NULL
+"statuses","description","text","YES",NULL
+"statuses","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"ticket_activities","id","uuid","NO","gen_random_uuid()"
+"ticket_activities","ticket_id","uuid","NO",NULL
+"ticket_activities","created_by","uuid","NO",NULL
+"ticket_activities","comment","text","NO",NULL
+"ticket_activities","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"ticket_activities","activity_type_id","uuid","YES",NULL
+"ticket_configuration_items","id","uuid","NO","gen_random_uuid()"
+"ticket_configuration_items","ticket_id","uuid","NO",NULL
+"ticket_configuration_items","ci_id","uuid","NO",NULL
+"ticket_configuration_items","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"ticket_configuration_items","relationship_type_id","uuid","YES",NULL
+"ticket_types","id","uuid","NO","gen_random_uuid()"
+"ticket_types","name","character varying","NO",NULL
+"ticket_types","description","text","YES",NULL
+"ticket_types","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"tickets","id","uuid","NO","gen_random_uuid()"
+"tickets","organization_id","uuid","NO",NULL
+"tickets","created_by","uuid","NO",NULL
+"tickets","assigned_to","uuid","YES",NULL
+"tickets","department_id","uuid","YES",NULL
+"tickets","ticket_number","character varying","NO",NULL
+"tickets","title","character varying","NO",NULL
+"tickets","description","text","YES",NULL
+"tickets","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"tickets","updated_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"tickets","status_id","uuid","YES",NULL
+"tickets","ticket_type_id","uuid","YES",NULL
+"tickets","priority_id","uuid","YES",NULL
+"users","id","uuid","NO","gen_random_uuid()"
+"users","organization_id","uuid","NO",NULL
+"users","role_id","uuid","NO",NULL
+"users","department_id","uuid","YES",NULL
+"users","name","character varying","NO",NULL
+"users","email","character varying","NO",NULL
+"users","password_hash","text","NO",NULL
+"users","created_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
+"users","updated_at","timestamp without time zone","YES","CURRENT_TIMESTAMP"
