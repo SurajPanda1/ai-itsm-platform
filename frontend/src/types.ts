@@ -1,4 +1,6 @@
 export interface User { id: string; name: string; email: string; roles: string[] }
+export interface Branding { organizationName: string; logoUrl?: string; faviconUrl?: string; primaryColor?: string; accentColor?: string; portalTitle?: string; welcomeMessage?: string; supportEmail?: string; supportPhone?: string; showPoweredBy?: boolean; themeMode?: 'DARK'|'LIGHT'|'SYSTEM' }
+export interface Attachment { id: string; fileName: string; contentType: string; sizeBytes: number; createdAt: string; uploadedBy: { id: string; name: string } }
 export interface Session { accessToken: string; user: User }
 export interface AssignmentGroup { id: string; name: string; description?: string; members: { user: Pick<User, 'id' | 'name' | 'email'> }[] }
 export interface RelatedItem { id: string; relationshipType: string; direction: 'INBOUND' | 'OUTBOUND'; ticketId: string; ticketNumber: string; title: string; status?: string; ticketType?: string; createdAt: string }
@@ -6,6 +8,8 @@ export interface AdminUser { id: string; name: string; email: string; active: bo
 export interface AdminGroup { id: string; name: string; description?: string; active: boolean; manager?: { id: string; name: string }; roles: { role: { id: string; name: string } }[]; members: { user: Pick<AdminUser, 'id' | 'name' | 'email' | 'active'> }[] }
 export interface ReferenceData { roles: { id: string; name: string; description?: string }[]; departments: { id: string; name: string; description?: string }[]; priorities: { id: string; name: string }[]; ticketTypes: { id: string; name: string }[]; calendars: { id: string; name: string; timezone: string; calendarType: string }[] }
 export interface PaginatedUsers { data: AdminUser[]; page: number; limit: number; total: number; totalPages: number }
+export interface PaginatedGroups { data: AdminGroup[]; page: number; limit: number; total: number; totalPages: number }
+export interface OrganizationSettings { organizationName: string; branding: { logoUrl?: string; faviconUrl?: string; primaryColor?: string; accentColor?: string; portalTitle?: string; welcomeMessage?: string; supportEmail?: string; supportPhone?: string; timezone?: string; showPoweredBy?: boolean; themeMode?: 'DARK'|'LIGHT'|'SYSTEM' }; attachments: { enabled?: boolean; provider?: 'NONE'|'S3'|'AZURE_BLOB'|'GCS'|'MINIO'|'LOCAL'; bucket?: string; region?: string; endpoint?: string; maxFileSizeMb?: number } }
 export interface SlaDefinition { id: string; name: string; version: number; active: boolean; responseTargetMinutes: number; resolutionTargetMinutes: number; priority?: { id: string; name: string }; ticketType?: { id: string; name: string }; calendar: { id: string; name: string; timezone: string; calendarType: string } }
 export interface Incident {
   id: string;

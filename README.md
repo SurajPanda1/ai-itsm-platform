@@ -23,7 +23,10 @@ Completed in the current MVP:
 - Search and status filtering
 - Role-based permissions
 - Reusable closed-ticket policy: only Admin can reopen a closed ticket
-- Dormant attachment-storage interface and configuration endpoint
+- Per-organization branding with client logo, favicon, portal text, colours, and Nextris Dark/Light/System themes
+- Admin-configured attachment storage with live connection testing
+- Ticket attachment upload, listing, download, deletion, metadata, permissions, and audit logging
+- Storage adapters for local/on-premises filesystems, Amazon S3, Azure Blob, Google Cloud Storage, and MinIO/S3-compatible services
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
 The service request, problem, change, CMDB, knowledge, reporting, and AI interfaces are not yet implemented in the application layer. Their original database tables are present.
@@ -42,7 +45,7 @@ NestJS backend (port 3000)
 PostgreSQL (ai_itsm)
 ```
 
-Planned attachment architecture stores metadata in PostgreSQL and file content in configurable object storage such as Amazon S3, Azure Blob, or MinIO. Attachments remain disabled until a provider is configured.
+Attachment metadata is stored in PostgreSQL while file content is stored through the organization's configured provider. Files are isolated by organization and ticket using `<organization-id>/<ticket-id>/...` storage keys. Branding assets use `<organization-id>/branding/...`. Attachments remain unavailable until an administrator successfully tests and enables storage.
 
 ## Repository layout
 
@@ -76,8 +79,15 @@ PORT=3000
 DATABASE_URL="postgresql://postgres:URL_ENCODED_PASSWORD@localhost:5432/ai_itsm?schema=public"
 JWT_SECRET="replace-with-at-least-32-random-characters"
 CORS_ORIGIN="http://localhost:5173"
-ATTACHMENTS_ENABLED=false
 ```
+
+Storage provider, location, file-size limit, branding, and theme are configured per organization in **Admin Console -> Branding & Storage**. Credentials are not stored in PostgreSQL:
+
+- AWS S3 uses the standard AWS credential chain or an ECS/EC2 IAM role.
+- Azure Blob uses `AZURE_STORAGE_CONNECTION_STRING`, or `AZURE_STORAGE_ACCOUNT_URL` with managed identity.
+- Google Cloud Storage uses Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS` locally.
+- MinIO uses `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`.
+- Local/on-premises storage uses a backend-accessible absolute folder path.
 
 Never commit `.env`. It is excluded by `.gitignore`.
 
@@ -92,6 +102,9 @@ npx.cmd prisma db execute --file prisma/manual/005_group_based_roles.sql --schem
 npx.cmd prisma db execute --file prisma/manual/006_sla_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/007_normalize_service_request_type.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/008_sla_lifecycle.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/009_organization_settings.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/010_ticket_attachments.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/011_nextris_dark_theme.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -157,6 +170,17 @@ Supporting endpoints:
 - `GET /api/tickets/:ticketId/related-items`
 - `POST /api/tickets/:ticketId/related-items`
 - `GET /api/attachments/configuration`
+- `GET /api/tickets/:ticketId/attachments`
+- `POST /api/tickets/:ticketId/attachments`
+- `GET /api/tickets/:ticketId/attachments/:attachmentId/download`
+- `DELETE /api/tickets/:ticketId/attachments/:attachmentId`
+- `GET /api/branding`
+- `GET /api/branding/assets/:organizationId/:kind`
+- `GET /api/admin/organization-settings`
+- `PATCH /api/admin/organization-settings`
+- `POST /api/admin/organization-settings/test-storage`
+- `POST /api/admin/organization-settings/branding/:kind`
+- `DELETE /api/admin/organization-settings/branding/:kind`
 - `GET /api/admin/slas`
 - `POST /api/admin/slas`
 
@@ -199,9 +223,8 @@ Before production use, the project still requires automated tests, managed migra
 
 ## Next milestones
 
-1. Finish incident workflow testing and inverse related-item display.
-2. Build Admin Console v1 for users, roles, departments, groups, memberships, and session settings.
-3. Implement service requests.
-4. Implement problems and changes/approvals.
-5. Implement CMDB and knowledge management.
-6. Add reporting, SLA management, notifications, attachments, and AI capabilities.
+1. Add browser-level regression tests for incident, attachment, branding, and Admin Console workflows.
+2. Build the service-request module and request catalogue.
+3. Implement problems and changes/approvals.
+4. Implement CMDB and knowledge management.
+5. Add the Analytics Console, notifications, and AI-assisted operations.

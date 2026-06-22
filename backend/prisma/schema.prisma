@@ -11,6 +11,8 @@ model Organization {
   id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name              String             @db.VarChar(100)
   domain            String?            @db.VarChar(100)
+  brandingSettings  Json               @default("{}") @map("branding_settings")
+  attachmentSettings Json              @default("{}") @map("attachment_settings")
   createdAt         DateTime           @default(now()) @map("created_at")
   users             User[]
   tickets           Ticket[]
@@ -18,6 +20,7 @@ model Organization {
   assignmentGroups  AssignmentGroup[]
   businessCalendars BusinessCalendar[]
   slaDefinitions    SlaDefinition[]
+  attachments       TicketAttachment[]
 
   @@map("organizations")
 }
@@ -53,6 +56,7 @@ model User {
   auditLogs                  AuditLog[]
   managedAssignmentGroups    AssignmentGroup[]       @relation("AssignmentGroupManager")
   assignmentGroupMemberships AssignmentGroupMember[]
+  uploadedAttachments        TicketAttachment[]
   directRoles                UserRole[]              @relation("UserRoleUser")
   grantedRoles               UserRole[]              @relation("UserRoleGrantedBy")
 
@@ -136,12 +140,31 @@ model Ticket {
   incident          Incident?
   activities        TicketActivity[]
   slas              TicketSla[]
+  attachments       TicketAttachment[]
 
   @@index([organizationId])
   @@index([assignedToId])
   @@index([statusId])
   @@index([assignmentGroupId])
   @@map("tickets")
+}
+
+model TicketAttachment {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  ticketId       String       @map("ticket_id") @db.Uuid
+  uploadedById   String       @map("uploaded_by") @db.Uuid
+  storageKey     String       @unique @map("storage_key") @db.VarChar(500)
+  fileName       String       @map("file_name") @db.VarChar(255)
+  contentType    String       @map("content_type") @db.VarChar(150)
+  sizeBytes      Int          @map("size_bytes")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticket         Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploadedBy     User         @relation(fields: [uploadedById], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_attachments")
 }
 
 model AssignmentGroup {

@@ -46,3 +46,31 @@ export class CreateBusinessCalendarDto {
   @IsOptional() @IsObject() weeklySchedule?: Record<string, { start: string; end: string }[]>;
   @IsOptional() @IsArray() @IsString({ each: true }) holidays?: string[];
 }
+
+export class UpdateOrganizationSettingsDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(100) organizationName?: string;
+  @IsOptional() @IsString() @MaxLength(500) logoUrl?: string;
+  @IsOptional() @IsString() @MaxLength(500) faviconUrl?: string;
+  @IsOptional() @IsString() @MaxLength(20) primaryColor?: string;
+  @IsOptional() @IsString() @MaxLength(20) accentColor?: string;
+  @IsOptional() @IsString() @MaxLength(100) portalTitle?: string;
+  @IsOptional() @IsString() @MaxLength(300) welcomeMessage?: string;
+  @IsOptional() @IsEmail() supportEmail?: string;
+  @IsOptional() @IsString() @MaxLength(40) supportPhone?: string;
+  @IsOptional() @IsString() @MaxLength(100) timezone?: string;
+  @IsOptional() @IsBoolean() showPoweredBy?: boolean;
+  @IsOptional() @IsIn(['DARK', 'LIGHT', 'SYSTEM']) themeMode?: string;
+  @IsOptional() @IsBoolean() attachmentsEnabled?: boolean;
+  @IsOptional() @IsIn(['NONE', 'S3', 'AZURE_BLOB', 'GCS', 'MINIO', 'LOCAL']) storageProvider?: string;
+  @IsOptional() @IsString() @MaxLength(200) storageBucket?: string;
+  @IsOptional() @IsString() @MaxLength(100) storageRegion?: string;
+  @IsOptional() @IsString() @MaxLength(500) storageEndpoint?: string;
+  @IsOptional() @IsInt() @Min(1) maxFileSizeMb?: number;
+}
+
+export class TestStorageConnectionDto {
+  @IsIn(['S3', 'AZURE_BLOB', 'GCS', 'MINIO', 'LOCAL']) provider!: string;
+  @IsString() @MinLength(1) bucket!: string;
+  @IsOptional() @IsString() region?: string;
+  @IsOptional() @IsString() endpoint?: string;
+}
