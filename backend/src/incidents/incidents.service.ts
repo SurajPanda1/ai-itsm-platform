@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
@@ -6,7 +6,8 @@ import { CreateIncidentDto } from './dto/create-incident.dto';
 import { AddCommentDto, AssignIncidentDto, ChangeStatusDto, ResolveIncidentDto } from './dto/incident-actions.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
 import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
-import { serviceDeskRoles } from '../auth/roles';
+import { employeeTicketScope, requireServiceDeskRole } from '../common/ticket-access.policy';
+import { calculate24x7DueDates } from '../common/sla-time';
 
 const incidentInclude = {
   status: true,
@@ -16,17 +17,12 @@ const incidentInclude = {
   assignmentGroup: { select: { id: true, name: true } },
   incident: true,
   activities: { include: { createdBy: { select: { id: true, name: true } }, activityType: true }, orderBy: { createdAt: 'desc' as const } },
+  slas: { include: { definition: { select: { id: true, name: true, version: true } } }, orderBy: { createdAt: 'desc' as const } },
 } satisfies Prisma.TicketInclude;
 
 @Injectable()
 export class IncidentsService {
   constructor(private readonly prisma: PrismaService) {}
-
-  private requireServiceDeskRole(user: AuthUser) {
-    if (!serviceDeskRoles.includes(user.role)) {
-      throw new ForbiddenException('This action requires a service desk role');
-    }
-  }
 
   async create(user: AuthUser, dto: CreateIncidentDto) {
     const [dbUser, status, type, priority] = await Promise.all([
@@ -37,6 +33,11 @@ export class IncidentsService {
     ]);
     if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
     if (!status || !type || !priority) throw new BadRequestException('Required lookup data is missing');
+    const matchingSlas = await this.prisma.slaDefinition.findMany({
+      where: { organizationId: user.organizationId, active: true, OR: [{ ticketTypeId: type.id }, { ticketTypeId: null }], AND: [{ OR: [{ priorityId: priority.id }, { priorityId: null }] }] },
+      include: { calendar: true },
+    });
+    const slaDefinition = matchingSlas.sort((a, b) => ((b.priorityId ? 2 : 0) + (b.ticketTypeId ? 1 : 0) + b.version / 1000) - ((a.priorityId ? 2 : 0) + (a.ticketTypeId ? 1 : 0) + a.version / 1000))[0];
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('ticket_number:INC'))`;
@@ -61,7 +62,12 @@ export class IncidentsService {
         include: incidentInclude,
       });
       await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE', newValue: { ticketNumber: ticket.ticketNumber, title: ticket.title }, changedById: user.id } });
-      return ticket;
+      if (slaDefinition) {
+        const startedAt = new Date();
+        const dueDates = calculate24x7DueDates(startedAt, slaDefinition.responseTargetMinutes, slaDefinition.resolutionTargetMinutes);
+        await tx.ticketSla.create({ data: { ticketId: ticket.id, slaDefinitionId: slaDefinition.id, definitionName: slaDefinition.name, definitionVersion: slaDefinition.version, responseTargetMinutes: slaDefinition.responseTargetMinutes, resolutionTargetMinutes: slaDefinition.resolutionTargetMinutes, startedAt, ...dueDates, events: { create: { eventType: 'STARTED', details: { calendar: slaDefinition.calendar.name, calendarType: slaDefinition.calendar.calendarType } } } } });
+      }
+      return tx.ticket.findUniqueOrThrow({ where: { id: ticket.id }, include: incidentInclude });
     });
   }
 
@@ -70,7 +76,7 @@ export class IncidentsService {
       where: {
         organizationId: user.organizationId,
         ticketType: { name: 'INCIDENT' },
-        ...(user.role === 'EMPLOYEE' ? { createdById: user.id } : {}),
+        ...employeeTicketScope(user),
       },
       include: incidentInclude,
       orderBy: { createdAt: 'desc' },
@@ -83,7 +89,7 @@ export class IncidentsService {
         id,
         organizationId: user.organizationId,
         ticketType: { name: 'INCIDENT' },
-        ...(user.role === 'EMPLOYEE' ? { createdById: user.id } : {}),
+        ...employeeTicketScope(user),
       },
       include: incidentInclude,
     });
@@ -92,7 +98,7 @@ export class IncidentsService {
   }
 
   async assign(user: AuthUser, id: string, dto: AssignIncidentDto) {
-    this.requireServiceDeskRole(user);
+    requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
     const group = await this.prisma.assignmentGroup.findFirst({ where: { id: dto.assignmentGroupId, organizationId: ticket.organizationId, active: true } });
     if (!group) throw new BadRequestException('Assignment group does not belong to this organization');
@@ -108,7 +114,7 @@ export class IncidentsService {
   }
 
   async update(user: AuthUser, id: string, dto: UpdateIncidentDto) {
-    this.requireServiceDeskRole(user);
+    requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
     const priority = dto.priority
       ? await this.prisma.priority.findUnique({ where: { name: dto.priority } })
@@ -148,7 +154,7 @@ export class IncidentsService {
   }
 
   async changeStatus(user: AuthUser, id: string, dto: ChangeStatusDto) {
-    this.requireServiceDeskRole(user);
+    requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
     enforceClosedTicketPolicy(user, ticket.status?.name, dto.status);
     const status = await this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: dto.status } } });
@@ -164,13 +170,24 @@ export class IncidentsService {
 
   async addComment(user: AuthUser, id: string, dto: AddCommentDto) {
     await this.findOne(user, id);
-    if (dto.type === 'WORK_NOTE') this.requireServiceDeskRole(user);
+    if (dto.type === 'WORK_NOTE') requireServiceDeskRole(user);
     const activityType = await this.prisma.activityType.findUnique({ where: { name: dto.type } });
-    return this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: dto.comment, activityTypeId: activityType?.id } });
+    return this.prisma.$transaction(async (tx) => {
+      const activity = await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: dto.comment, activityTypeId: activityType?.id } });
+      if (dto.type === 'WORK_NOTE') {
+        const pending = await tx.ticketSla.findMany({ where: { ticketId: id, firstRespondedAt: null } });
+        const now = new Date();
+        for (const sla of pending) {
+          await tx.ticketSla.update({ where: { id: sla.id }, data: { firstRespondedAt: now, updatedAt: now } });
+          await tx.slaEvent.create({ data: { ticketSlaId: sla.id, eventType: now <= sla.responseDueAt ? 'RESPONSE_MET' : 'RESPONSE_BREACHED', eventAt: now } });
+        }
+      }
+      return activity;
+    });
   }
 
   async resolve(user: AuthUser, id: string, dto: ResolveIncidentDto) {
-    this.requireServiceDeskRole(user);
+    requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
     const status = await this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'RESOLVED' } } });
     if (!status) throw new BadRequestException('RESOLVED lookup status is missing');
@@ -180,6 +197,13 @@ export class IncidentsService {
       await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Incident resolved: ${dto.resolutionNotes}`, activityTypeId: activityType?.id } });
       const updated = await tx.ticket.update({ where: { id }, data: { statusId: status.id, updatedAt: new Date() }, include: incidentInclude });
       await tx.auditLog.create({ data: { organizationId: ticket.organizationId, tableName: 'tickets', recordId: id, action: 'RESOLVE', oldValue: { status: ticket.status?.name }, newValue: { status: 'RESOLVED', resolutionNotes: dto.resolutionNotes }, changedById: user.id } });
+      const activeSlas = await tx.ticketSla.findMany({ where: { ticketId: id, resolvedAt: null } });
+      const resolvedAt = new Date();
+      for (const sla of activeSlas) {
+        const slaStatus = resolvedAt <= sla.resolutionDueAt ? 'MET' : 'BREACHED';
+        await tx.ticketSla.update({ where: { id: sla.id }, data: { resolvedAt, status: slaStatus, updatedAt: resolvedAt } });
+        await tx.slaEvent.create({ data: { ticketSlaId: sla.id, eventType: slaStatus === 'MET' ? 'RESOLUTION_MET' : 'RESOLUTION_BREACHED', eventAt: resolvedAt } });
+      }
       return updated;
     });
   }

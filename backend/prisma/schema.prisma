@@ -8,24 +8,28 @@ datasource db {
 }
 
 model Organization {
-  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name             String            @db.VarChar(100)
-  domain           String?           @db.VarChar(100)
-  createdAt        DateTime          @default(now()) @map("created_at")
-  users            User[]
-  tickets          Ticket[]
-  auditLogs        AuditLog[]
-  assignmentGroups AssignmentGroup[]
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String             @db.VarChar(100)
+  domain            String?            @db.VarChar(100)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  users             User[]
+  tickets           Ticket[]
+  auditLogs         AuditLog[]
+  assignmentGroups  AssignmentGroup[]
+  businessCalendars BusinessCalendar[]
+  slaDefinitions    SlaDefinition[]
 
   @@map("organizations")
 }
 
 model Role {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String   @unique @db.VarChar(50)
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String                @unique @db.VarChar(50)
   description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime              @default(now()) @map("created_at")
   users       User[]
+  groupRoles  AssignmentGroupRole[]
+  userRoles   UserRole[]
 
   @@map("roles")
 }
@@ -40,6 +44,7 @@ model User {
   passwordHash               String                  @map("password_hash")
   createdAt                  DateTime                @default(now()) @map("created_at")
   updatedAt                  DateTime                @default(now()) @map("updated_at")
+  active                     Boolean                 @default(true)
   organization               Organization            @relation(fields: [organizationId], references: [id])
   role                       Role                    @relation(fields: [roleId], references: [id])
   createdTickets             Ticket[]                @relation("TicketCreator")
@@ -48,6 +53,8 @@ model User {
   auditLogs                  AuditLog[]
   managedAssignmentGroups    AssignmentGroup[]       @relation("AssignmentGroupManager")
   assignmentGroupMemberships AssignmentGroupMember[]
+  directRoles                UserRole[]              @relation("UserRoleUser")
+  grantedRoles               UserRole[]              @relation("UserRoleGrantedBy")
 
   @@map("users")
 }
@@ -82,22 +89,24 @@ model Status {
 }
 
 model TicketType {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String   @unique @db.VarChar(50)
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  tickets     Ticket[]
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String          @unique @db.VarChar(50)
+  description    String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  tickets        Ticket[]
+  slaDefinitions SlaDefinition[]
 
   @@map("ticket_types")
 }
 
 model Priority {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String   @unique @db.VarChar(50)
-  level       Int
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  tickets     Ticket[]
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String          @unique @db.VarChar(50)
+  level          Int
+  description    String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  tickets        Ticket[]
+  slaDefinitions SlaDefinition[]
 
   @@map("priorities")
 }
@@ -126,6 +135,7 @@ model Ticket {
   assignmentGroup   AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
   incident          Incident?
   activities        TicketActivity[]
+  slas              TicketSla[]
 
   @@index([organizationId])
   @@index([assignedToId])
@@ -147,9 +157,34 @@ model AssignmentGroup {
   manager        User?                   @relation("AssignmentGroupManager", fields: [managerId], references: [id])
   members        AssignmentGroupMember[]
   tickets        Ticket[]
+  roles          AssignmentGroupRole[]
 
   @@unique([organizationId, name])
   @@map("assignment_groups")
+}
+
+model AssignmentGroupRole {
+  assignmentGroupId String          @map("assignment_group_id") @db.Uuid
+  roleId            String          @map("role_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at")
+  assignmentGroup   AssignmentGroup @relation(fields: [assignmentGroupId], references: [id], onDelete: Cascade)
+  role              Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([assignmentGroupId, roleId])
+  @@map("assignment_group_roles")
+}
+
+model UserRole {
+  userId      String   @map("user_id") @db.Uuid
+  roleId      String   @map("role_id") @db.Uuid
+  grantedById String?  @map("granted_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation("UserRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  grantedBy   User?    @relation("UserRoleGrantedBy", fields: [grantedById], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_roles")
 }
 
 model AssignmentGroupMember {
@@ -199,4 +234,86 @@ model TicketActivity {
 
   @@index([ticketId])
   @@map("ticket_activities")
+}
+
+model BusinessCalendar {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  name           String          @db.VarChar(100)
+  timezone       String          @default("UTC") @db.VarChar(100)
+  calendarType   String          @default("TWENTY_FOUR_SEVEN") @map("calendar_type") @db.VarChar(30)
+  weeklySchedule Json?           @map("weekly_schedule")
+  holidays       Json?           @default("[]")
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @default(now()) @map("updated_at")
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  definitions    SlaDefinition[]
+
+  @@unique([organizationId, name])
+  @@map("business_calendars")
+}
+
+model SlaDefinition {
+  id                      String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId          String           @map("organization_id") @db.Uuid
+  name                    String           @db.VarChar(120)
+  ticketTypeId            String?          @map("ticket_type_id") @db.Uuid
+  priorityId              String?          @map("priority_id") @db.Uuid
+  calendarId              String           @map("calendar_id") @db.Uuid
+  responseTargetMinutes   Int              @map("response_target_minutes")
+  resolutionTargetMinutes Int              @map("resolution_target_minutes")
+  pauseStatuses           Json?            @default("[]") @map("pause_statuses")
+  version                 Int              @default(1)
+  active                  Boolean          @default(true)
+  effectiveFrom           DateTime         @default(now()) @map("effective_from")
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @default(now()) @map("updated_at")
+  organization            Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticketType              TicketType?      @relation(fields: [ticketTypeId], references: [id])
+  priority                Priority?        @relation(fields: [priorityId], references: [id])
+  calendar                BusinessCalendar @relation(fields: [calendarId], references: [id])
+  ticketSlas              TicketSla[]
+
+  @@unique([organizationId, name, version])
+  @@map("sla_definitions")
+}
+
+model TicketSla {
+  id                      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId                String        @map("ticket_id") @db.Uuid
+  slaDefinitionId         String        @map("sla_definition_id") @db.Uuid
+  definitionName          String        @map("definition_name") @db.VarChar(120)
+  definitionVersion       Int           @map("definition_version")
+  responseTargetMinutes   Int           @map("response_target_minutes")
+  resolutionTargetMinutes Int           @map("resolution_target_minutes")
+  startedAt               DateTime      @default(now()) @map("started_at")
+  responseDueAt           DateTime      @map("response_due_at")
+  resolutionDueAt         DateTime      @map("resolution_due_at")
+  firstRespondedAt        DateTime?     @map("first_responded_at")
+  resolvedAt              DateTime?     @map("resolved_at")
+  pausedAt                DateTime?     @map("paused_at")
+  totalPausedSeconds      Int           @default(0) @map("total_paused_seconds")
+  status                  String        @default("IN_PROGRESS") @db.VarChar(30)
+  createdAt               DateTime      @default(now()) @map("created_at")
+  updatedAt               DateTime      @default(now()) @map("updated_at")
+  ticket                  Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  definition              SlaDefinition @relation(fields: [slaDefinitionId], references: [id])
+  events                  SlaEvent[]
+
+  @@unique([ticketId, slaDefinitionId])
+  @@index([status, resolutionDueAt])
+  @@map("ticket_slas")
+}
+
+model SlaEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketSlaId String    @map("ticket_sla_id") @db.Uuid
+  eventType   String    @map("event_type") @db.VarChar(30)
+  eventAt     DateTime  @default(now()) @map("event_at")
+  details     Json?
+  ticketSla   TicketSla @relation(fields: [ticketSlaId], references: [id], onDelete: Cascade)
+
+  @@index([ticketSlaId, eventAt])
+  @@map("sla_events")
 }

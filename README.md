@@ -87,6 +87,10 @@ Apply the current manual migrations in order when preparing an existing v1 datab
 npx.cmd prisma db execute --file prisma/manual/001_assignment_groups.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/002_ticket_relationships.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/003_it_service_manager_role.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/004_admin_console.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/005_group_based_roles.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/006_sla_foundation.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/007_normalize_service_request_type.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -116,7 +120,9 @@ npm.cmd run dev
 
 Open `http://localhost:5173`.
 
-## Roles
+## Roles and access grants
+
+Every active user receives the `EMPLOYEE` baseline. Elevated roles are normally granted to assignment groups, and users inherit the union of roles from all groups they belong to. Exceptional direct grants are retained for controlled or emergency administration. The legacy `users.role_id` field remains temporarily for rollback compatibility but is no longer the authorization source.
 
 - `EMPLOYEE`: creates tickets and sees their own records and public comments.
 - `IT_AGENT`: works organization queues, assignments, work notes, and related items.
@@ -150,6 +156,12 @@ Supporting endpoints:
 - `GET /api/tickets/:ticketId/related-items`
 - `POST /api/tickets/:ticketId/related-items`
 - `GET /api/attachments/configuration`
+- `GET /api/admin/slas`
+- `POST /api/admin/slas`
+
+## SLA foundation
+
+SLA policies are organization-specific and versioned. New incidents snapshot the matching response and resolution targets so later policy changes do not rewrite historical performance. First work notes record response performance; incident resolution records resolution performance. The current calculation engine supports 24×7 elapsed-time calendars. Custom business-hours schedules, holidays, and pause/resume processing are modeled but must be completed before those calendar types are enabled.
 
 ## Verification
 

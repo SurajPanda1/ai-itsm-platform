@@ -29,6 +29,15 @@
 
 The backend must enforce permissions. Frontend visibility is a usability layer, not a security boundary.
 
+## Role assignment model
+
+- Every active user receives `EMPLOYEE` access automatically.
+- `assignment_group_roles` grants elevated roles to groups.
+- Users inherit roles through `assignment_group_members`.
+- `user_roles` supports exceptional direct grants and preserves existing access during migration.
+- Effective JWT roles are the union of the Employee baseline, group grants, and direct grants.
+- The legacy `users.role_id` column is retained only for rollback compatibility and should not be used for new authorization decisions.
+
 ## Admin Console roadmap
 
 - Users, roles, departments, assignment groups, and memberships.

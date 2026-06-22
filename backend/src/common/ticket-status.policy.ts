@@ -7,7 +7,7 @@ export function enforceClosedTicketPolicy(
   nextStatus: string,
 ) {
   const isReopening = currentStatus === 'CLOSED' && nextStatus !== 'CLOSED';
-  if (isReopening && user.role !== 'ADMIN') {
+  if (isReopening && !user.roles.includes('ADMIN')) {
     throw new ForbiddenException('Only an administrator can reopen a closed ticket');
   }
 }

@@ -8,9 +8,10 @@ import { AuthModule } from './auth/auth.module';
 import { AssignmentGroupsModule } from './assignment-groups/assignment-groups.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { RelatedItemsModule } from './related-items/related-items.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, IncidentsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, AdminModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, IncidentsModule],
   controllers: [AppController],
   providers: [AppService],
 })
