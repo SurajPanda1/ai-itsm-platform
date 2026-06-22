@@ -1,4 +1,4 @@
-import type { AssignmentGroup, Attachment, Branding, Incident, OrganizationSettings, PaginatedGroups, PaginatedUsers, ReferenceData, RelatedItem, Session, SlaDefinition } from './types';
+import type { AnalyticsReport, AssignmentGroup, Attachment, Branding, Incident, OrganizationSettings, PaginatedGroups, PaginatedUsers, ReferenceData, RelatedItem, Session, SlaDefinition } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
 
@@ -38,6 +38,8 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export const api = {
   branding: async () => { const value=await request<Branding>(`/branding?domain=${encodeURIComponent(window.location.hostname)}`);return {...value,logoUrl:absoluteAssetUrl(value.logoUrl),faviconUrl:absoluteAssetUrl(value.faviconUrl)}; },
+  analytics: (token:string,query:string) => request<AnalyticsReport>(`/analytics?${query}`,{},token),
+  exportAnalytics: async (token:string,query:string) => { const response=await fetch(`${API_URL}/analytics/export.csv?${query}`,{headers:{authorization:`Bearer ${token}`}});if(!response.ok)throw new Error('Could not export analytics');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download='incident-analytics.csv';link.click();URL.revokeObjectURL(url); },
   login: (email: string, password: string) => request<Session>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   incidents: (token: string) => request<Incident[]>('/incidents', {}, token),
   createIncident: (token: string, input: object) => request<Incident>('/incidents', { method: 'POST', body: JSON.stringify(input) }, token),

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import AdminConsoleV2 from "./AdminConsole";
+import AnalyticsConsole from "./AnalyticsConsole";
 import type {
   AdminGroup,
   AdminUser,
@@ -1203,6 +1204,7 @@ function Dashboard({ session, onLogout, branding }: { session: Session; onLogout
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [adminOpen, setAdminOpen] = useState(false);
+  const [analyticsOpen,setAnalyticsOpen]=useState(false);
   useEffect(() => {
     api
       .incidents(session.accessToken)
@@ -1268,6 +1270,7 @@ function Dashboard({ session, onLogout, branding }: { session: Session; onLogout
               ⚙ <span>Admin Console</span>
             </a>
           )}
+          {!isEmployee&&<a className="admin-link" onClick={()=>setAnalyticsOpen(true)}>▥ <span>Analytics Console</span></a>}
         </nav>
         <div className="user-block">
           <div className="avatar">
@@ -1454,6 +1457,7 @@ function Dashboard({ session, onLogout, branding }: { session: Session; onLogout
           onClose={() => setAdminOpen(false)}
         />
       )}
+      {analyticsOpen&&<AnalyticsConsole token={session.accessToken} onClose={()=>setAnalyticsOpen(false)}/>}
     </div>
   );
 }

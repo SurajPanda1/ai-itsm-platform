@@ -27,6 +27,7 @@ Completed in the current MVP:
 - Admin-configured attachment storage with live connection testing
 - Ticket attachment upload, listing, download, deletion, metadata, permissions, and audit logging
 - Storage adapters for local/on-premises filesystems, Amazon S3, Azure Blob, Google Cloud Storage, and MinIO/S3-compatible services
+- Analytics Console with incident KPIs, trends, SLA outcomes, aging, workload reporting, filters, scoped access, and CSV export
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
 The service request, problem, change, CMDB, knowledge, reporting, and AI interfaces are not yet implemented in the application layer. Their original database tables are present.
@@ -181,6 +182,8 @@ Supporting endpoints:
 - `POST /api/admin/organization-settings/test-storage`
 - `POST /api/admin/organization-settings/branding/:kind`
 - `DELETE /api/admin/organization-settings/branding/:kind`
+- `GET /api/analytics`
+- `GET /api/analytics/export.csv`
 - `GET /api/admin/slas`
 - `POST /api/admin/slas`
 
@@ -223,7 +226,7 @@ Before production use, the project still requires automated tests, managed migra
 
 ## Next milestones
 
-1. Add browser-level regression tests for incident, attachment, branding, and Admin Console workflows.
+1. Add browser-level regression tests for incident, attachment, branding, Admin Console, and Analytics workflows.
 2. Build the service-request module and request catalogue.
 3. Implement problems and changes/approvals.
 4. Implement CMDB and knowledge management.
