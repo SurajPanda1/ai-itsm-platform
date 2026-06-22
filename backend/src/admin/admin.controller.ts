@@ -5,7 +5,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminGuard } from './admin.guard';
-import { CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, UpdateGroupDto, UpdateUserDto } from './admin.dto';
+import { CreateBusinessCalendarDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, UpdateGroupDto, UpdateUserDto } from './admin.dto';
 import { Roles } from '../auth/roles';
 
 @Controller('admin')
@@ -98,6 +98,11 @@ export class AdminController {
   @Get('slas')
   slas(@CurrentUser() user: AuthUser) {
     return this.prisma.slaDefinition.findMany({ where: { organizationId: user.organizationId }, include: { priority: { select: { id: true, name: true } }, ticketType: { select: { id: true, name: true } }, calendar: { select: { id: true, name: true, timezone: true, calendarType: true } } }, orderBy: [{ active: 'desc' }, { name: 'asc' }, { version: 'desc' }] });
+  }
+
+  @Post('calendars')
+  createCalendar(@CurrentUser() user: AuthUser, @Body() dto: CreateBusinessCalendarDto) {
+    return this.prisma.businessCalendar.create({ data: { organizationId: user.organizationId, name: dto.name, timezone: dto.timezone, calendarType: dto.calendarType, weeklySchedule: dto.weeklySchedule ?? undefined, holidays: dto.holidays ?? [] } });
   }
 
   @Post('slas')

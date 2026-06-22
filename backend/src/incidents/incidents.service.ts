@@ -7,7 +7,8 @@ import { AddCommentDto, AssignIncidentDto, ChangeStatusDto, ResolveIncidentDto }
 import { UpdateIncidentDto } from './dto/update-incident.dto';
 import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
 import { employeeTicketScope, requireServiceDeskRole } from '../common/ticket-access.policy';
-import { calculate24x7DueDates } from '../common/sla-time';
+import { addSlaMinutes } from '../sla/sla-calendar';
+import { SlaService } from '../sla/sla.service';
 
 const incidentInclude = {
   status: true,
@@ -22,7 +23,7 @@ const incidentInclude = {
 
 @Injectable()
 export class IncidentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly slaService: SlaService) {}
 
   async create(user: AuthUser, dto: CreateIncidentDto) {
     const [dbUser, status, type, priority] = await Promise.all([
@@ -64,7 +65,7 @@ export class IncidentsService {
       await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE', newValue: { ticketNumber: ticket.ticketNumber, title: ticket.title }, changedById: user.id } });
       if (slaDefinition) {
         const startedAt = new Date();
-        const dueDates = calculate24x7DueDates(startedAt, slaDefinition.responseTargetMinutes, slaDefinition.resolutionTargetMinutes);
+        const dueDates = { responseDueAt: addSlaMinutes(startedAt, slaDefinition.responseTargetMinutes, slaDefinition.calendar), resolutionDueAt: addSlaMinutes(startedAt, slaDefinition.resolutionTargetMinutes, slaDefinition.calendar) };
         await tx.ticketSla.create({ data: { ticketId: ticket.id, slaDefinitionId: slaDefinition.id, definitionName: slaDefinition.name, definitionVersion: slaDefinition.version, responseTargetMinutes: slaDefinition.responseTargetMinutes, resolutionTargetMinutes: slaDefinition.resolutionTargetMinutes, startedAt, ...dueDates, events: { create: { eventType: 'STARTED', details: { calendar: slaDefinition.calendar.name, calendarType: slaDefinition.calendar.calendarType } } } } });
       }
       return tx.ticket.findUniqueOrThrow({ where: { id: ticket.id }, include: incidentInclude });
@@ -159,13 +160,15 @@ export class IncidentsService {
     enforceClosedTicketPolicy(user, ticket.status?.name, dto.status);
     const status = await this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: dto.status } } });
     if (!status) throw new BadRequestException(`Unknown ticket status: ${dto.status}`);
-    return this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const activityType = await tx.activityType.findUnique({ where: { name: 'STATUS_CHANGE' } });
       await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Status changed from ${ticket.status?.name ?? 'unset'} to ${dto.status}`, activityTypeId: activityType?.id } });
       const updated = await tx.ticket.update({ where: { id }, data: { statusId: status.id, updatedAt: new Date() }, include: incidentInclude });
       await tx.auditLog.create({ data: { organizationId: ticket.organizationId, tableName: 'tickets', recordId: id, action: 'STATUS_CHANGE', oldValue: { status: ticket.status?.name }, newValue: { status: dto.status }, changedById: user.id } });
       return updated;
     });
+    await this.slaService.handleStatusChange(id, dto.status);
+    return this.findOne(user, id);
   }
 
   async addComment(user: AuthUser, id: string, dto: AddCommentDto) {

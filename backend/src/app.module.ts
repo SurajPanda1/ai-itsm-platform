@@ -9,9 +9,11 @@ import { AssignmentGroupsModule } from './assignment-groups/assignment-groups.mo
 import { AttachmentsModule } from './attachments/attachments.module';
 import { RelatedItemsModule } from './related-items/related-items.module';
 import { AdminModule } from './admin/admin.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { SlaModule } from './sla/sla.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, AdminModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, IncidentsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, IncidentsModule],
   controllers: [AppController],
   providers: [AppService],
 })

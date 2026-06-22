@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsEmail, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateUserDto {
   @IsString() @MinLength(2) @MaxLength(100) name!: string;
@@ -37,4 +37,12 @@ export class CreateSlaDefinitionDto {
   @IsInt() @Min(1) responseTargetMinutes!: number;
   @IsInt() @Min(1) resolutionTargetMinutes!: number;
   @IsOptional() @IsArray() @IsString({ each: true }) pauseStatuses?: string[];
+}
+
+export class CreateBusinessCalendarDto {
+  @IsString() @MinLength(2) @MaxLength(100) name!: string;
+  @IsString() timezone!: string;
+  @IsIn(['TWENTY_FOUR_SEVEN', 'BUSINESS_HOURS']) calendarType!: string;
+  @IsOptional() @IsObject() weeklySchedule?: Record<string, { start: string; end: string }[]>;
+  @IsOptional() @IsArray() @IsString({ each: true }) holidays?: string[];
 }

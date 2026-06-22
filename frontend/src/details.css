@@ -71,3 +71,14 @@
 .ticket-sla { border: 1px solid #eaecf0; border-radius: 8px; padding: 12px; margin-top: 8px; }
 .ticket-sla div { display: flex; justify-content: space-between; gap: 8px; }
 .ticket-sla small { display: block; color: #667085; margin-top: 6px; }
+.sla-countdown { display: block; color: #087443; margin-top: 8px; font-size: 13px; }
+.admin-form-stack { display: grid; gap: 18px; }
+.calendar-editor { margin-top: 24px; background: #fff; border: 1px solid #eaecf0; border-radius: 12px; padding: 22px; }
+.calendar-editor h2 { font: 700 18px Manrope; margin: 0 0 6px; }
+.calendar-fields { display: grid; grid-template-columns: 1fr 1.5fr 130px 130px; gap: 12px; margin: 18px 0; }
+.calendar-fields label, .holiday-field { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
+.day-picker { display: flex; flex-wrap: wrap; gap: 9px; margin: 16px 0; }
+.day-picker label { display: flex; align-items: center; gap: 6px; background: #f9fafb; border: 1px solid #eaecf0; border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.holiday-field { margin-bottom: 16px; }
+.holiday-field small { color: #667085; font-weight: 400; }
+@media (max-width: 800px) { .calendar-fields { grid-template-columns: 1fr 1fr; } }

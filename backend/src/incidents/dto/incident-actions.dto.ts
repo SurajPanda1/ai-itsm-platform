@@ -9,7 +9,7 @@ export class AssignIncidentDto {
 }
 
 export class ChangeStatusDto {
-  @IsIn(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'])
+  @IsIn(['OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER', 'RESOLVED', 'CLOSED'])
   status!: string;
 }
 

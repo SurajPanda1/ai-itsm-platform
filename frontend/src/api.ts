@@ -60,4 +60,5 @@ export const api = {
   adminSlas: (token: string) => request<SlaDefinition[]>('/admin/slas', {}, token),
   createAdminSla: (token: string, input: object) => request('/admin/slas', { method: 'POST', body: JSON.stringify(input) }, token),
   deactivateAdminSla: (token: string, id: string) => request(`/admin/slas/${id}/deactivate`, { method: 'PATCH', body: '{}' }, token),
+  createBusinessCalendar: (token: string, input: object) => request('/admin/calendars', { method: 'POST', body: JSON.stringify(input) }, token),
 };

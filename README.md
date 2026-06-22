@@ -91,6 +91,7 @@ npx.cmd prisma db execute --file prisma/manual/004_admin_console.sql --schema pr
 npx.cmd prisma db execute --file prisma/manual/005_group_based_roles.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/006_sla_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/007_normalize_service_request_type.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/008_sla_lifecycle.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -161,7 +162,7 @@ Supporting endpoints:
 
 ## SLA foundation
 
-SLA policies are organization-specific and versioned. New incidents snapshot the matching response and resolution targets so later policy changes do not rewrite historical performance. First work notes record response performance; incident resolution records resolution performance. The current calculation engine supports 24×7 elapsed-time calendars. Custom business-hours schedules, holidays, and pause/resume processing are modeled but must be completed before those calendar types are enabled.
+SLA policies are organization-specific and versioned. New incidents snapshot the matching response and resolution targets so later policy changes do not rewrite historical performance. First work notes record response performance; incident resolution records resolution performance. The engine supports 24×7 and timezone-aware business-hours calendars, holiday exclusion, Awaiting Customer pause/resume, live countdowns, and scheduled at-risk/breach evaluation. The initial Admin calendar form creates Monday–Friday 09:00–17:00 calendars; a richer per-day and holiday editor remains planned.
 
 ## Verification
 
@@ -174,6 +175,15 @@ npm.cmd run build
 ```
 
 Both builds must pass before committing.
+
+Run the self-cleaning SLA database verification when changing SLA persistence or lifecycle behavior:
+
+```powershell
+cd backend
+npm.cmd run verify:sla
+```
+
+The verification creates temporary SLA records, checks start/pause/resume events, and removes all temporary data before exiting.
 
 ## Deployment direction
 
