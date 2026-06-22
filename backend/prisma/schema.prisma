@@ -1,0 +1,202 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String            @db.VarChar(100)
+  domain           String?           @db.VarChar(100)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  users            User[]
+  tickets          Ticket[]
+  auditLogs        AuditLog[]
+  assignmentGroups AssignmentGroup[]
+
+  @@map("organizations")
+}
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique @db.VarChar(50)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id                         String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId             String                  @map("organization_id") @db.Uuid
+  roleId                     String                  @map("role_id") @db.Uuid
+  departmentId               String?                 @map("department_id") @db.Uuid
+  name                       String                  @db.VarChar(100)
+  email                      String                  @unique @db.VarChar(150)
+  passwordHash               String                  @map("password_hash")
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @default(now()) @map("updated_at")
+  organization               Organization            @relation(fields: [organizationId], references: [id])
+  role                       Role                    @relation(fields: [roleId], references: [id])
+  createdTickets             Ticket[]                @relation("TicketCreator")
+  assignedTickets            Ticket[]                @relation("TicketAssignee")
+  activities                 TicketActivity[]
+  auditLogs                  AuditLog[]
+  managedAssignmentGroups    AssignmentGroup[]       @relation("AssignmentGroupManager")
+  assignmentGroupMemberships AssignmentGroupMember[]
+
+  @@map("users")
+}
+
+model AuditLog {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?       @map("organization_id") @db.Uuid
+  tableName      String        @map("table_name") @db.VarChar(100)
+  recordId       String        @map("record_id") @db.Uuid
+  action         String        @db.VarChar(50)
+  oldValue       Json?         @map("old_value")
+  newValue       Json?         @map("new_value")
+  changedById    String?       @map("changed_by") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at")
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  changedBy      User?         @relation(fields: [changedById], references: [id])
+
+  @@index([tableName, recordId])
+  @@map("audit_logs")
+}
+
+model Status {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  module      String   @db.VarChar(50)
+  name        String   @db.VarChar(50)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  tickets     Ticket[]
+
+  @@unique([module, name])
+  @@map("statuses")
+}
+
+model TicketType {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique @db.VarChar(50)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  tickets     Ticket[]
+
+  @@map("ticket_types")
+}
+
+model Priority {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique @db.VarChar(50)
+  level       Int
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  tickets     Ticket[]
+
+  @@map("priorities")
+}
+
+model Ticket {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  createdById       String           @map("created_by") @db.Uuid
+  assignedToId      String?          @map("assigned_to") @db.Uuid
+  departmentId      String?          @map("department_id") @db.Uuid
+  ticketNumber      String           @unique @map("ticket_number") @db.VarChar(20)
+  title             String           @db.VarChar(200)
+  description       String?
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @default(now()) @map("updated_at")
+  statusId          String?          @map("status_id") @db.Uuid
+  ticketTypeId      String?          @map("ticket_type_id") @db.Uuid
+  priorityId        String?          @map("priority_id") @db.Uuid
+  assignmentGroupId String?          @map("assignment_group_id") @db.Uuid
+  organization      Organization     @relation(fields: [organizationId], references: [id])
+  createdBy         User             @relation("TicketCreator", fields: [createdById], references: [id])
+  assignedTo        User?            @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  status            Status?          @relation(fields: [statusId], references: [id])
+  ticketType        TicketType?      @relation(fields: [ticketTypeId], references: [id])
+  priority          Priority?        @relation(fields: [priorityId], references: [id])
+  assignmentGroup   AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
+  incident          Incident?
+  activities        TicketActivity[]
+
+  @@index([organizationId])
+  @@index([assignedToId])
+  @@index([statusId])
+  @@index([assignmentGroupId])
+  @@map("tickets")
+}
+
+model AssignmentGroup {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  name           String                  @db.VarChar(100)
+  description    String?
+  managerId      String?                 @map("manager_id") @db.Uuid
+  active         Boolean                 @default(true)
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @default(now()) @map("updated_at")
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  manager        User?                   @relation("AssignmentGroupManager", fields: [managerId], references: [id])
+  members        AssignmentGroupMember[]
+  tickets        Ticket[]
+
+  @@unique([organizationId, name])
+  @@map("assignment_groups")
+}
+
+model AssignmentGroupMember {
+  assignmentGroupId String          @map("assignment_group_id") @db.Uuid
+  userId            String          @map("user_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at")
+  assignmentGroup   AssignmentGroup @relation(fields: [assignmentGroupId], references: [id], onDelete: Cascade)
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([assignmentGroupId, userId])
+  @@map("assignment_group_members")
+}
+
+model Incident {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId        String    @unique @map("ticket_id") @db.Uuid
+  impact          String?   @default("LOW") @db.VarChar(20)
+  urgency         String?   @default("LOW") @db.VarChar(20)
+  affectedService String?   @map("affected_service") @db.VarChar(100)
+  resolutionNotes String?   @map("resolution_notes")
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  ticket          Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("incidents")
+}
+
+model ActivityType {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String           @unique @db.VarChar(50)
+  description String?
+  activities  TicketActivity[]
+
+  @@map("activity_types")
+}
+
+model TicketActivity {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId       String        @map("ticket_id") @db.Uuid
+  createdById    String        @map("created_by") @db.Uuid
+  comment        String
+  createdAt      DateTime      @default(now()) @map("created_at")
+  activityTypeId String?       @map("activity_type_id") @db.Uuid
+  ticket         Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdBy      User          @relation(fields: [createdById], references: [id])
+  activityType   ActivityType? @relation(fields: [activityTypeId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_activities")
+}
