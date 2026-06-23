@@ -11,6 +11,18 @@ export class CreateServiceCategoryDto {
   description?: string;
 }
 
+export class UpdateServiceCategoryDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
 export class CreateServiceCatalogItemDto {
   @IsUUID()
   categoryId!: string;
@@ -110,4 +122,28 @@ export class DecideApprovalDto {
   @IsOptional()
   @IsString()
   decisionComment?: string;
+}
+
+export class UpdateRequestTaskDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(200)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsUUID()
+  assignmentGroupId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string;
+
+  @IsOptional()
+  @IsIn(['OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'])
+  status?: string;
 }

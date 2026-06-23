@@ -3,7 +3,7 @@ import { AuthUser } from '../auth/auth-user';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AddCommentDto, AssignIncidentDto, ChangeStatusDto } from '../incidents/dto/incident-actions.dto';
-import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
+import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
 import { ServiceRequestsService } from './service-requests.service';
 
 @Controller('service-requests')
@@ -19,6 +19,11 @@ export class ServiceRequestsController {
   @Post('catalog/categories')
   createCategory(@CurrentUser() user: AuthUser, @Body() dto: CreateServiceCategoryDto) {
     return this.serviceRequests.createCategory(user, dto);
+  }
+
+  @Patch('catalog/categories/:id')
+  updateCategory(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateServiceCategoryDto) {
+    return this.serviceRequests.updateCategory(user, id, dto);
   }
 
   @Post('catalog/items')
@@ -69,5 +74,10 @@ export class ServiceRequestsController {
   @Patch(':id/approvals/:approvalId')
   decideApproval(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('approvalId', ParseUUIDPipe) approvalId: string, @Body() dto: DecideApprovalDto) {
     return this.serviceRequests.decideApproval(user, id, approvalId, dto);
+  }
+
+  @Patch(':id/tasks/:taskId')
+  updateTask(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('taskId', ParseUUIDPipe) taskId: string, @Body() dto: UpdateRequestTaskDto) {
+    return this.serviceRequests.updateTask(user, id, taskId, dto);
   }
 }

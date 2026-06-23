@@ -6,7 +6,7 @@ import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
 import { PrismaService } from '../prisma/prisma.service';
 import { addSlaMinutes } from '../sla/sla-calendar';
 import { SlaService } from '../sla/sla.service';
-import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
+import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
 import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
 
 const serviceRequestInclude = {
@@ -43,6 +43,16 @@ export class ServiceRequestsService {
     requireServiceDeskRole(user);
     return this.prisma.serviceCatalogCategory.create({
       data: { organizationId: user.organizationId, name: dto.name, description: dto.description },
+    });
+  }
+
+  async updateCategory(user: AuthUser, id: string, dto: UpdateServiceCategoryDto) {
+    requireServiceDeskRole(user);
+    const category = await this.prisma.serviceCatalogCategory.findFirst({ where: { id, organizationId: user.organizationId } });
+    if (!category) throw new NotFoundException('Service catalog category not found');
+    return this.prisma.serviceCatalogCategory.update({
+      where: { id },
+      data: { name: dto.name, description: dto.description, updatedAt: new Date() },
     });
   }
 
@@ -265,6 +275,33 @@ export class ServiceRequestsService {
       }
       return tx.ticket.findUniqueOrThrow({ where: { id }, include: serviceRequestInclude });
     });
+  }
+
+  async updateTask(user: AuthUser, id: string, taskId: string, dto: UpdateRequestTaskDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.prisma.ticket.findFirst({ where: { id, organizationId: user.organizationId, ticketType: { name: 'SERVICE_REQUEST' } }, include: { serviceRequest: true } });
+    if (!ticket?.serviceRequest) throw new NotFoundException('Service request not found');
+    const task = await this.prisma.requestTask.findFirst({ where: { id: taskId, serviceRequestId: ticket.serviceRequest.id } });
+    if (!task) throw new NotFoundException('Request task not found');
+    if (dto.assignmentGroupId) await this.ensureGroup(user, dto.assignmentGroupId);
+    if (dto.assignedToId) {
+      const assignee = await this.prisma.user.findFirst({ where: { id: dto.assignedToId, organizationId: user.organizationId, active: true } });
+      if (!assignee) throw new BadRequestException('Assignee must be an active user in this organization');
+    }
+    await this.prisma.requestTask.update({
+      where: { id: taskId },
+      data: {
+        title: dto.title,
+        description: dto.description,
+        assignmentGroupId: dto.assignmentGroupId,
+        assignedToId: dto.assignedToId,
+        status: dto.status,
+        completedAt: dto.status === 'COMPLETED' ? new Date() : dto.status ? null : undefined,
+        updatedAt: new Date(),
+      },
+    });
+    await this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Task ${task.taskNumber} updated${dto.status ? ` to ${dto.status}` : ''}` } });
+    return this.prisma.ticket.findUniqueOrThrow({ where: { id }, include: serviceRequestInclude });
   }
 
   private async ensureCategory(user: AuthUser, id: string) {

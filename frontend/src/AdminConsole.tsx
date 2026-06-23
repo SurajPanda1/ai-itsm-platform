@@ -6,6 +6,7 @@ import type {
   OrganizationSettings,
   ReferenceData,
   ServiceCatalogCategory,
+  ServiceCatalogItem,
   SlaDefinition,
 } from "./types";
 import { rawTimeZones } from "@vvo/tzdb";
@@ -190,7 +191,11 @@ export default function AdminConsole({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [storageTested, setStorageTested] = useState(false);
-  const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "add-department" | "department-list">("user-list");
+  const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "add-department" | "department-list" | "edit-department">("user-list");
+  const [groupsPanel, setGroupsPanel] = useState<"add-group" | "group-list" | "edit-group">("group-list");
+  const [catalogPanel, setCatalogPanel] = useState<"add-category" | "add-item" | "add-approval" | "catalog-list" | "category-items" | "edit-category" | "edit-item">("catalog-list");
+  const [slaPanel, setSlaPanel] = useState<"add-sla" | "add-calendar" | "sla-list" | "edit-sla">("sla-list");
+  const [settingsPanel, setSettingsPanel] = useState<"branding" | "storage">("branding");
   const [editingGroup, setEditingGroup] = useState<AdminGroup | null>(null);
   const [editGroup, setEditGroup] = useState({ name: "", description: "", email: "", phone: "", groupType: "FULFILLMENT", managerId: "", active: true });
   const [newUser, setNewUser] = useState({
@@ -204,7 +209,17 @@ export default function AdminConsole({
   });
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [editUser, setEditUser] = useState({ name: "", phone: "", departmentId: "", managerId: "", managerRequiredExempt: false, active: true });
+  const [editingCatalogItem, setEditingCatalogItem] = useState<ServiceCatalogItem | null>(null);
+  const [editingSla, setEditingSla] = useState<SlaDefinition | null>(null);
+  const [editCatalogItem, setEditCatalogItem] = useState({ name: "", description: "", defaultAssignmentGroupId: "", formSchema: "[]", taskTemplates: "[]", active: true });
+  const [selectedCategory, setSelectedCategory] = useState<ServiceCatalogCategory | null>(null);
+  const [editingCategory, setEditingCategory] = useState<ServiceCatalogCategory | null>(null);
+  const [editCategory, setEditCategory] = useState({ name: "", description: "" });
+  const [fieldDraft, setFieldDraft] = useState({ key: "", label: "", type: "text", required: false });
+  const [taskDraft, setTaskDraft] = useState({ title: "", description: "", assignmentGroupId: "" });
   const [newDepartment, setNewDepartment] = useState({ name: "", description: "" });
+  const [editingDepartment, setEditingDepartment] = useState<{ id: string; name: string; description?: string } | null>(null);
+  const [editDepartment, setEditDepartment] = useState({ name: "", description: "" });
   const [newGroup, setNewGroup] = useState({ name: "", description: "", email: "", phone: "", groupType: "FULFILLMENT", managerId: "" });
   const [newCategory, setNewCategory] = useState({ name: "", description: "" });
   const [newCatalogItem, setNewCatalogItem] = useState({
@@ -316,6 +331,7 @@ export default function AdminConsole({
   }
   function startEditUser(user: AdminUser) {
     setEditingUser(user);
+    setUsersPanel("user-list");
     setEditUser({
       name: user.name,
       phone: user.phone || "",
@@ -325,9 +341,40 @@ export default function AdminConsole({
       active: user.active,
     });
   }
+  function startEditDepartment(department: { id: string; name: string; description?: string }) {
+    setEditingDepartment(department);
+    setEditDepartment({ name: department.name, description: department.description || "" });
+    setUsersPanel("edit-department");
+  }
   function startEditGroup(group: AdminGroup) {
     setEditingGroup(group);
+    setGroupsPanel("edit-group");
     setEditGroup({ name: group.name, description: group.description || "", email: group.email || "", phone: group.phone || "", groupType: group.groupType || "FULFILLMENT", managerId: group.manager?.id || "", active: group.active });
+  }
+  function startEditCatalogItem(item: ServiceCatalogItem) {
+    setEditingCatalogItem(item);
+    setCatalogPanel("edit-item");
+    setEditCatalogItem({
+      name: item.name,
+      description: item.description || "",
+      defaultAssignmentGroupId: item.defaultAssignmentGroup?.id || "",
+      formSchema: JSON.stringify(item.formSchema || [], null, 2),
+      taskTemplates: JSON.stringify(item.taskTemplates || [], null, 2),
+      active: true,
+    });
+  }
+  function openCategoryItems(category: ServiceCatalogCategory) {
+    setSelectedCategory(category);
+    setCatalogPanel("category-items");
+  }
+  function startEditCategory(category: ServiceCatalogCategory) {
+    setEditingCategory(category);
+    setEditCategory({ name: category.name, description: category.description || "" });
+    setCatalogPanel("edit-category");
+  }
+  function startEditSla(sla: SlaDefinition) {
+    setEditingSla(sla);
+    setSlaPanel("edit-sla");
   }
   async function saveGroupEdit(e: FormEvent) {
     e.preventDefault();
@@ -336,6 +383,7 @@ export default function AdminConsole({
     try {
       await api.updateAdminGroup(token, editingGroup.id, { ...editGroup, managerId: editGroup.managerId || undefined, phone: editGroup.phone || undefined });
       setEditingGroup(null);
+      setGroupsPanel("group-list");
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not update group");
@@ -363,6 +411,48 @@ export default function AdminConsole({
       setBusy(false);
     }
   }
+  async function saveCatalogItemEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingCatalogItem) return;
+    setBusy(true);
+    setError("");
+    try {
+      const formSchema = JSON.parse(editCatalogItem.formSchema || "[]");
+      const taskTemplates = JSON.parse(editCatalogItem.taskTemplates || "[]");
+      if (!Array.isArray(formSchema) || !Array.isArray(taskTemplates)) throw new Error("Form schema and task templates must be JSON arrays.");
+      await api.updateServiceCatalogItem(token, editingCatalogItem.id, {
+        name: editCatalogItem.name,
+        description: editCatalogItem.description,
+        defaultAssignmentGroupId: editCatalogItem.defaultAssignmentGroupId || undefined,
+        formSchema,
+        taskTemplates,
+        active: editCatalogItem.active,
+      });
+      setEditingCatalogItem(null);
+      setCatalogPanel("catalog-list");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update catalogue item");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveCategoryEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingCategory) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateServiceCategory(token, editingCategory.id, editCategory);
+      setEditingCategory(null);
+      setCatalogPanel("catalog-list");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update category");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function createDepartment(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -373,6 +463,22 @@ export default function AdminConsole({
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create department");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveDepartmentEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingDepartment) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateDepartment(token, editingDepartment.id, editDepartment);
+      setEditingDepartment(null);
+      setUsersPanel("department-list");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update department");
     } finally {
       setBusy(false);
     }
@@ -400,6 +506,44 @@ export default function AdminConsole({
       setError(reason instanceof Error ? reason.message : "Could not create category");
     } finally {
       setBusy(false);
+    }
+  }
+  function appendFormField(target: "new" | "edit") {
+    if (!fieldDraft.key.trim() || !fieldDraft.label.trim()) {
+      setError("Field key and label are required.");
+      return;
+    }
+    try {
+      const source = target === "new" ? newCatalogItem.formSchema : editCatalogItem.formSchema;
+      const parsed = JSON.parse(source || "[]");
+      const fields = Array.isArray(parsed) ? parsed : [];
+      const next = [...fields, { key: fieldDraft.key.trim(), label: fieldDraft.label.trim(), type: fieldDraft.type, required: fieldDraft.required }];
+      const value = JSON.stringify(next, null, 2);
+      if (target === "new") setNewCatalogItem({ ...newCatalogItem, formSchema: value });
+      else setEditCatalogItem({ ...editCatalogItem, formSchema: value });
+      setFieldDraft({ key: "", label: "", type: "text", required: false });
+      setError("");
+    } catch {
+      setError("Form schema must be valid JSON before adding another field.");
+    }
+  }
+  function appendTaskTemplate(target: "new" | "edit") {
+    if (!taskDraft.title.trim()) {
+      setError("Task title is required.");
+      return;
+    }
+    try {
+      const source = target === "new" ? newCatalogItem.taskTemplates : editCatalogItem.taskTemplates;
+      const parsed = JSON.parse(source || "[]");
+      const tasks = Array.isArray(parsed) ? parsed : [];
+      const next = [...tasks, { title: taskDraft.title.trim(), description: taskDraft.description.trim() || undefined, assignmentGroupId: taskDraft.assignmentGroupId || undefined }];
+      const value = JSON.stringify(next, null, 2);
+      if (target === "new") setNewCatalogItem({ ...newCatalogItem, taskTemplates: value });
+      else setEditCatalogItem({ ...editCatalogItem, taskTemplates: value });
+      setTaskDraft({ title: "", description: "", assignmentGroupId: "" });
+      setError("");
+    } catch {
+      setError("Task templates must be valid JSON before adding another task.");
     }
   }
   async function createCatalogItem(e: FormEvent) {
@@ -717,6 +861,21 @@ export default function AdminConsole({
               </label>
               <button className="primary" disabled={busy}>Create department</button>
             </form>}
+            {editingDepartment && usersPanel === "edit-department" && <form className="admin-form" onSubmit={saveDepartmentEdit}>
+              <h2>Edit department</h2>
+              <label>
+                Department name
+                <input required value={editDepartment.name} onChange={(e) => setEditDepartment({ ...editDepartment, name: e.target.value })} />
+              </label>
+              <label>
+                Description
+                <textarea rows={3} value={editDepartment.description} onChange={(e) => setEditDepartment({ ...editDepartment, description: e.target.value })} />
+              </label>
+              <div className="modal-actions">
+                <button type="button" className="secondary" onClick={() => { setEditingDepartment(null); setUsersPanel("department-list"); }}>Cancel</button>
+                <button className="primary" disabled={busy}>Save department</button>
+              </div>
+            </form>}
             {editingUser && usersPanel === "user-list" && (
               <form className="admin-form" onSubmit={saveUserEdit}>
                 <h2>Edit user</h2>
@@ -764,6 +923,7 @@ export default function AdminConsole({
                 <article key={department.id}>
                   <div className="avatar">{department.name.slice(0,2).toUpperCase()}</div>
                   <div><b>{department.name}</b><small>{department.description || "No description"}</small></div>
+                  <button className="secondary small" onClick={() => startEditDepartment(department)}>Edit</button>
                 </article>
               ))}
             </div>}
@@ -825,7 +985,11 @@ export default function AdminConsole({
         {tab === "groups" && (
           <div className="admin-grid">
             <div className="admin-form-stack">
-            <form className="admin-form" onSubmit={createGroup}>
+              <div className="admin-form admin-card-menu">
+                <button type="button" className={groupsPanel === "add-group" ? "secondary active" : "secondary"} onClick={() => setGroupsPanel("add-group")}>Add Assignment Group</button>
+                <button type="button" className={groupsPanel === "group-list" ? "secondary active" : "secondary"} onClick={() => setGroupsPanel("group-list")}>Assignment Group List</button>
+              </div>
+            {groupsPanel === "add-group" && <form className="admin-form" onSubmit={createGroup}>
               <h2>Add assignment group</h2>
               <label>
                 Name
@@ -898,8 +1062,8 @@ export default function AdminConsole({
                 </select>
               </label>
               <button className="primary">Create group</button>
-            </form>
-            {editingGroup && (
+            </form>}
+            {editingGroup && groupsPanel === "edit-group" && (
               <form className="admin-form" onSubmit={saveGroupEdit}>
                 <h2>Edit assignment group</h2>
                 <label>Name<input required value={editGroup.name} onChange={(e)=>setEditGroup({...editGroup,name:e.target.value})}/></label>
@@ -923,7 +1087,7 @@ export default function AdminConsole({
               </form>
             )}
             </div>
-            <div className="admin-list">
+            {groupsPanel === "group-list" && <div className="admin-list">
               <div className="admin-list-head">
                 <h2>
                   Assignment Groups <span>{groupTotal}</span>
@@ -989,13 +1153,19 @@ export default function AdminConsole({
                   Next
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
         )}
         {tab === "catalog" && (
           <div className="admin-grid">
             <div className="admin-form-stack">
-              <form className="admin-form" onSubmit={createCategory}>
+              <div className="admin-form admin-card-menu">
+                <button type="button" className={catalogPanel === "add-category" ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("add-category")}>Add Category</button>
+                <button type="button" className={catalogPanel === "add-item" ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("add-item")}>Add Catalogue Item</button>
+                <button type="button" className={catalogPanel === "add-approval" ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("add-approval")}>Add Approval Rule</button>
+                <button type="button" className={["catalog-list", "category-items", "edit-category", "edit-item"].includes(catalogPanel) ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("catalog-list")}>Catalogue List</button>
+              </div>
+              {catalogPanel === "add-category" && <form className="admin-form" onSubmit={createCategory}>
                 <h2>Add request category</h2>
                 <p className="muted">
                   Categories group catalogue items shown to employees.
@@ -1009,8 +1179,8 @@ export default function AdminConsole({
                   <textarea rows={3} value={newCategory.description} onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })} />
                 </label>
                 <button className="primary" disabled={busy}>Create category</button>
-              </form>
-              <form className="admin-form" onSubmit={createCatalogItem}>
+              </form>}
+              {catalogPanel === "add-item" && <form className="admin-form" onSubmit={createCatalogItem}>
                 <h2>Add catalogue item</h2>
                 <p className="muted">
                   Set the default routing group. SLA targets are configured separately in the SLA Policies tab by choosing ticket type SERVICE_REQUEST.
@@ -1039,17 +1209,38 @@ export default function AdminConsole({
                 </label>
                 <label>
                   Form schema
+                  <div className="admin-helper-grid">
+                    <input placeholder="Field key, e.g. laptopModel" value={fieldDraft.key} onChange={(e) => setFieldDraft({ ...fieldDraft, key: e.target.value })} />
+                    <input placeholder="Label shown to user" value={fieldDraft.label} onChange={(e) => setFieldDraft({ ...fieldDraft, label: e.target.value })} />
+                    <select value={fieldDraft.type} onChange={(e) => setFieldDraft({ ...fieldDraft, type: e.target.value })}>
+                      <option value="text">Text</option>
+                      <option value="textarea">Long text</option>
+                      <option value="number">Number</option>
+                      <option value="date">Date</option>
+                    </select>
+                    <label className="check-row"><input type="checkbox" checked={fieldDraft.required} onChange={(e) => setFieldDraft({ ...fieldDraft, required: e.target.checked })} />Required</label>
+                    <button type="button" className="secondary small" onClick={() => appendFormField("new")}>Add field</button>
+                  </div>
                   <textarea rows={4} value={newCatalogItem.formSchema} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, formSchema: e.target.value })} />
-                  <small className="muted">Stored now for future dynamic forms. Current request form uses the default request details field.</small>
+                  <small className="muted">Advanced / optional. Leave as [] unless you want to define extra fields on this request form. Example: [{"{"}"key":"laptopModel","label":"Laptop model","type":"text","required":true{"}"}]</small>
                 </label>
                 <label>
                   Task templates
+                  <div className="admin-helper-grid">
+                    <input placeholder="Task title" value={taskDraft.title} onChange={(e) => setTaskDraft({ ...taskDraft, title: e.target.value })} />
+                    <input placeholder="Task description" value={taskDraft.description} onChange={(e) => setTaskDraft({ ...taskDraft, description: e.target.value })} />
+                    <select value={taskDraft.assignmentGroupId} onChange={(e) => setTaskDraft({ ...taskDraft, assignmentGroupId: e.target.value })}>
+                      <option value="">No default group</option>
+                      {groups.filter((group) => group.active).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                    <button type="button" className="secondary small" onClick={() => appendTaskTemplate("new")}>Add task</button>
+                  </div>
                   <textarea rows={5} value={newCatalogItem.taskTemplates} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, taskTemplates: e.target.value })} />
-                  <small className="muted">JSON array, e.g. [{"{"}"title":"Create account","assignmentGroupId":"group-id"{"}"}]. These become TASK records after approvals are not required or later approved.</small>
+                  <small className="muted">Advanced / optional. Leave as [] if this request should not auto-create tasks. Example: [{"{"}"title":"Create account","assignmentGroupId":"group-id"{"}"}]. Tasks are created after approval is completed, or immediately if no approval is needed.</small>
                 </label>
                 <button className="primary" disabled={busy || catalog.length === 0}>Create catalogue item</button>
-              </form>
-              <form className="admin-form" onSubmit={createApprovalRule}>
+              </form>}
+              {catalogPanel === "add-approval" && <form className="admin-form" onSubmit={createApprovalRule}>
                 <h2>Add approval rule</h2>
                 <p className="muted">
                   Approval rules run in sequence. Manager approval uses the requester's manager.
@@ -1092,15 +1283,109 @@ export default function AdminConsole({
                   </label>
                 )}
                 <button className="primary" disabled={busy || !newApprovalRule.catalogItemId}>Create approval rule</button>
-              </form>
+              </form>}
+              {editingCatalogItem && catalogPanel === "edit-item" && <form className="admin-form" onSubmit={saveCatalogItemEdit}>
+                <h2>Edit catalogue item</h2>
+                <p className="muted">
+                  Basic admins can safely update name, description, routing group, and Active. Form schema and task templates are advanced JSON settings; leave them as [] if unused.
+                </p>
+                <label>
+                  Item name
+                  <input required value={editCatalogItem.name} onChange={(e) => setEditCatalogItem({ ...editCatalogItem, name: e.target.value })} />
+                </label>
+                <label>
+                  Description
+                  <textarea rows={3} value={editCatalogItem.description} onChange={(e) => setEditCatalogItem({ ...editCatalogItem, description: e.target.value })} />
+                </label>
+                <label>
+                  Default assignment group
+                  <select value={editCatalogItem.defaultAssignmentGroupId} onChange={(e) => setEditCatalogItem({ ...editCatalogItem, defaultAssignmentGroupId: e.target.value })}>
+                    <option value="">No default group</option>
+                    {groups.filter((group) => group.active).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Form schema
+                  <div className="admin-helper-grid">
+                    <input placeholder="Field key, e.g. employeeId" value={fieldDraft.key} onChange={(e) => setFieldDraft({ ...fieldDraft, key: e.target.value })} />
+                    <input placeholder="Label shown to user" value={fieldDraft.label} onChange={(e) => setFieldDraft({ ...fieldDraft, label: e.target.value })} />
+                    <select value={fieldDraft.type} onChange={(e) => setFieldDraft({ ...fieldDraft, type: e.target.value })}>
+                      <option value="text">Text</option>
+                      <option value="textarea">Long text</option>
+                      <option value="number">Number</option>
+                      <option value="date">Date</option>
+                    </select>
+                    <label className="check-row"><input type="checkbox" checked={fieldDraft.required} onChange={(e) => setFieldDraft({ ...fieldDraft, required: e.target.checked })} />Required</label>
+                    <button type="button" className="secondary small" onClick={() => appendFormField("edit")}>Add field</button>
+                  </div>
+                  <textarea rows={4} value={editCatalogItem.formSchema} onChange={(e) => setEditCatalogItem({ ...editCatalogItem, formSchema: e.target.value })} />
+                  <small className="muted">Usage: define extra fields shown on this request form. Example: [{"{"}"key":"employeeId","label":"Employee ID","type":"text","required":true{"}"}]. Keep [] for the normal request details field only.</small>
+                </label>
+                <label>
+                  Task templates
+                  <div className="admin-helper-grid">
+                    <input placeholder="Task title" value={taskDraft.title} onChange={(e) => setTaskDraft({ ...taskDraft, title: e.target.value })} />
+                    <input placeholder="Task description" value={taskDraft.description} onChange={(e) => setTaskDraft({ ...taskDraft, description: e.target.value })} />
+                    <select value={taskDraft.assignmentGroupId} onChange={(e) => setTaskDraft({ ...taskDraft, assignmentGroupId: e.target.value })}>
+                      <option value="">No default group</option>
+                      {groups.filter((group) => group.active).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                    <button type="button" className="secondary small" onClick={() => appendTaskTemplate("edit")}>Add task</button>
+                  </div>
+                  <textarea rows={5} value={editCatalogItem.taskTemplates} onChange={(e) => setEditCatalogItem({ ...editCatalogItem, taskTemplates: e.target.value })} />
+                  <small className="muted">Usage: auto-create fulfilment tasks for this catalogue item. Example: [{"{"}"title":"Procure laptop","assignmentGroupId":"group-id"{"}"}]. Keep [] if no child tasks are required.</small>
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" checked={editCatalogItem.active} onChange={(e) => setEditCatalogItem({ ...editCatalogItem, active: e.target.checked })} />
+                  Active
+                </label>
+                <div className="modal-actions">
+                  <button type="button" className="secondary" onClick={() => { setEditingCatalogItem(null); setCatalogPanel("catalog-list"); }}>Cancel</button>
+                  <button className="primary" disabled={busy}>Save catalogue item</button>
+                </div>
+              </form>}
+              {editingCategory && catalogPanel === "edit-category" && <form className="admin-form" onSubmit={saveCategoryEdit}>
+                <h2>Edit category</h2>
+                <label>
+                  Category name
+                  <input required value={editCategory.name} onChange={(e) => setEditCategory({ ...editCategory, name: e.target.value })} />
+                </label>
+                <label>
+                  Description
+                  <textarea rows={3} value={editCategory.description} onChange={(e) => setEditCategory({ ...editCategory, description: e.target.value })} />
+                </label>
+                <div className="modal-actions">
+                  <button type="button" className="secondary" onClick={() => { setEditingCategory(null); setCatalogPanel("catalog-list"); }}>Cancel</button>
+                  <button className="primary" disabled={busy}>Save category</button>
+                </div>
+              </form>}
             </div>
-            <div className="admin-list">
-              <h2>Service Catalogue <span>{catalog.reduce((total, category) => total + category.items.length, 0)}</span></h2>
+            {catalogPanel === "catalog-list" && <div className="admin-list">
+              <h2>Categories <span>{catalog.length}</span></h2>
               {catalog.length === 0 && <p className="muted">No request categories yet.</p>}
-              {catalog.map((category) => (
-                <article className="group-card catalog-card" key={category.id}>
-                  <b>{category.name}</b>
-                  <small>{category.description || "No description"}</small>
+              <div className="catalog-tile-grid">
+                {catalog.map((category) => (
+                  <article className="catalog-category-tile" key={category.id}>
+                    <button type="button" className="catalog-tile-main" onClick={() => openCategoryItems(category)}>
+                      <b>{category.name}</b>
+                      <small>{category.description || "No description"}</small>
+                      <span>{category.items.length} item(s)</span>
+                    </button>
+                    <button className="secondary small" onClick={() => startEditCategory(category)}>Edit</button>
+                  </article>
+                ))}
+              </div>
+            </div>}
+            {catalogPanel === "category-items" && <div className="admin-list">
+              {(() => {
+                const category = selectedCategory ? catalog.find((x) => x.id === selectedCategory.id) || selectedCategory : null;
+                if (!category) return <p className="muted">Choose a category from the Catalogue List.</p>;
+                return <>
+                  <div className="admin-list-head">
+                    <h2>{category.name} <span>{category.items.length}</span></h2>
+                    <button className="secondary small" onClick={() => setCatalogPanel("catalog-list")}>Back to categories</button>
+                  </div>
+                  <p className="muted">{category.description || "No category description."}</p>
                   <div className="catalog-items">
                     {category.items.length === 0 ? <p className="muted">No active catalogue items in this category.</p> : category.items.map((item) => (
                       <div className="catalog-item-row" key={item.id}>
@@ -1110,27 +1395,24 @@ export default function AdminConsole({
                           <small>Routes to {item.defaultAssignmentGroup?.name || "No default group"}</small>
                           <small>{item.approvalRules?.length || 0} approval rule(s) · {Array.isArray(item.taskTemplates) ? item.taskTemplates.length : 0} task template(s)</small>
                         </div>
-                        <button
-                          className="secondary small"
-                          onClick={async () => {
-                            await api.updateServiceCatalogItem(token, item.id, { active: false });
-                            await load();
-                          }}
-                        >
-                          Deactivate
-                        </button>
+                        <button className="secondary small" onClick={() => startEditCatalogItem(item)}>Edit</button>
                       </div>
                     ))}
                   </div>
-                </article>
-              ))}
-            </div>
+                </>;
+              })()}
+            </div>}
           </div>
         )}
         {tab === "slas" && (
           <div className="admin-grid">
             <div className="admin-form-stack">
-              <form className="admin-form" onSubmit={createSla}>
+              <div className="admin-form admin-card-menu">
+                <button type="button" className={slaPanel === "add-sla" ? "secondary active" : "secondary"} onClick={() => setSlaPanel("add-sla")}>Add SLA Policy</button>
+                <button type="button" className={slaPanel === "add-calendar" ? "secondary active" : "secondary"} onClick={() => setSlaPanel("add-calendar")}>Add Calendar</button>
+                <button type="button" className={slaPanel === "sla-list" ? "secondary active" : "secondary"} onClick={() => setSlaPanel("sla-list")}>SLA Policy List</button>
+              </div>
+              {slaPanel === "add-sla" && <form className="admin-form" onSubmit={createSla}>
                 <h2>Add SLA policy</h2>
                 <p className="muted">
                   For Service Requests, choose ticket type SERVICE_REQUEST. New requests snapshot the matching SLA when submitted.
@@ -1220,8 +1502,8 @@ export default function AdminConsole({
                   />
                 </label>
                 <button className="primary">Create SLA</button>
-              </form>
-              <div className="admin-form">
+              </form>}
+              {slaPanel === "add-calendar" && <div className="admin-form">
                 <h2>Add business calendar</h2>
                 <p className="muted">
                   Monday–Friday, 09:00–17:00. Holidays can be added in the next
@@ -1255,9 +1537,43 @@ export default function AdminConsole({
                 >
                   Create calendar
                 </button>
-              </div>
+              </div>}
+              {editingSla && slaPanel === "edit-sla" && <div className="admin-form">
+                <h2>Edit SLA policy</h2>
+                <p className="muted">
+                  Existing SLA policies are versioned. For now, this screen safely handles activation status; deeper edits should create a new policy version.
+                </p>
+                <label>
+                  Name
+                  <input value={editingSla.name} disabled />
+                </label>
+                <label>
+                  Scope
+                  <input value={`${editingSla.ticketType?.name || "All tickets"} · ${editingSla.priority?.name || "All priorities"} · ${editingSla.calendar.name}`} disabled />
+                </label>
+                <label>
+                  Targets
+                  <input value={`Response: ${editingSla.responseTargetMinutes} min · Resolution: ${editingSla.resolutionTargetMinutes} min`} disabled />
+                </label>
+                <div className="modal-actions">
+                  <button type="button" className="secondary" onClick={() => { setEditingSla(null); setSlaPanel("sla-list"); }}>Cancel</button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!editingSla.active || busy}
+                    onClick={async () => {
+                      await api.deactivateAdminSla(token, editingSla.id);
+                      setEditingSla(null);
+                      setSlaPanel("sla-list");
+                      await load();
+                    }}
+                  >
+                    {editingSla.active ? "Deactivate" : "Inactive"}
+                  </button>
+                </div>
+              </div>}
             </div>
-            <div className="admin-list">
+            {slaPanel === "sla-list" && <div className="admin-list">
               <h2>
                 SLA Policies <span>{slas.length}</span>
               </h2>
@@ -1276,24 +1592,19 @@ export default function AdminConsole({
                     <span>Response: {s.responseTargetMinutes} min</span>
                     <span>Resolution: {s.resolutionTargetMinutes} min</span>
                   </div>
-                  <button
-                    className="secondary small"
-                    disabled={!s.active}
-                    onClick={async () => {
-                      await api.deactivateAdminSla(token, s.id);
-                      await load();
-                    }}
-                  >
-                    {s.active ? "Deactivate" : "Inactive"}
-                  </button>
+                  <button className="secondary small" onClick={() => startEditSla(s)}>Edit</button>
                 </article>
               ))}
-            </div>
+            </div>}
           </div>
         )}
         {tab === "settings" && (
-          <form className="settings-layout" onSubmit={saveSettings}>
-            <div className="admin-form settings-section">
+          <form className="admin-grid" onSubmit={saveSettings}>
+            <div className="admin-form admin-card-menu">
+              <button type="button" className={settingsPanel === "branding" ? "secondary active" : "secondary"} onClick={() => setSettingsPanel("branding")}>Organisation & Branding</button>
+              <button type="button" className={settingsPanel === "storage" ? "secondary active" : "secondary"} onClick={() => setSettingsPanel("storage")}>Attachments & Storage</button>
+            </div>
+            {settingsPanel === "branding" && <div className="admin-form settings-section">
               <h2>Organisation & branding</h2>
               <p className="muted">
                 These values are unique to this client organisation.
@@ -1443,8 +1754,8 @@ export default function AdminConsole({
                 />{" "}
                 Show “Powered by Nextris Sevā”
               </label>
-            </div>
-            <div className="settings-column">
+            </div>}
+            {settingsPanel === "storage" && <div className="settings-column">
               <div className="admin-form settings-section">
                 <h2>Attachments & storage</h2>
                 <p className="muted">
@@ -1613,7 +1924,7 @@ export default function AdminConsole({
               <button className="primary settings-save" disabled={busy}>
                 {busy ? "Saving…" : "Save organisation settings"}
               </button>
-            </div>
+            </div>}
           </form>
         )}
         {tab === "slas" && <CalendarEditor token={token} onCreated={load} />}

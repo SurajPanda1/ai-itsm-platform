@@ -6,7 +6,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminGuard } from './admin.guard';
-import { CreateBusinessCalendarDto, CreateDepartmentDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, TestStorageConnectionDto, UpdateGroupDto, UpdateOrganizationSettingsDto, UpdateUserDto } from './admin.dto';
+import { CreateBusinessCalendarDto, CreateDepartmentDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, TestStorageConnectionDto, UpdateDepartmentDto, UpdateGroupDto, UpdateOrganizationSettingsDto, UpdateUserDto } from './admin.dto';
 import { Roles } from '../auth/roles';
 import { Prisma } from '@prisma/client';
 import { AttachmentConnectionService } from '../attachments/attachment-connection.service';
@@ -82,6 +82,18 @@ export class AdminController {
       INSERT INTO departments (organization_id, name, description)
       VALUES (${user.organizationId}::uuid, ${dto.name}, ${dto.description ?? null})
       ON CONFLICT DO NOTHING
+    `;
+  }
+
+  @Patch('departments/:id')
+  updateDepartment(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateDepartmentDto) {
+    return this.prisma.$queryRaw`
+      UPDATE departments
+      SET name = COALESCE(${dto.name ?? null}, name),
+          description = COALESCE(${dto.description ?? null}, description),
+          updated_at = now()
+      WHERE id = ${id}::uuid AND organization_id = ${user.organizationId}::uuid
+      RETURNING id, name, description
     `;
   }
 

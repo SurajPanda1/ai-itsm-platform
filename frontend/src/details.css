@@ -104,8 +104,27 @@ html[data-theme="dark"] .analytics-kpis article,html[data-theme="dark"] .analyti
 .sla-countdown { display: block; color: #087443; margin-top: 8px; font-size: 13px; }
 .catalog-items { display: grid; gap: 10px; margin-top: 14px; }
 .catalog-item-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; border: 1px solid #eaecf0; border-radius: 8px; padding: 12px; }
+.catalog-item-row > div { display: grid; gap: 5px; min-width: 0; }
+.catalog-item-row b, .catalog-item-row small { display: block; }
+.catalog-item-row small { line-height: 1.35; }
 html[data-theme="dark"] .catalog-item-row { border-color: #28323d; background: #0d141b; }
-.admin-form-stack { display: grid; gap: 18px; }
+.task-edit-row { display: grid; gap: 8px; min-width: 220px; }
+.task-edit-row select { width: 100%; }
+.catalog-tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.catalog-category-tile { border: 1px solid #eaecf0; border-radius: 14px; padding: 14px; display: grid; gap: 12px; background: #fff; }
+.catalog-tile-main { border: 0; background: transparent; color: inherit; padding: 0; text-align: left; display: grid; gap: 6px; cursor: pointer; }
+.catalog-tile-main b { font: 700 16px Manrope; }
+.catalog-tile-main small { color: #667085; }
+.catalog-tile-main span { color: var(--brand-primary, #16a394); font-weight: 700; }
+html[data-theme="dark"] .catalog-category-tile { border-color: #28323d; background: #0d141b; }
+html[data-theme="dark"] .catalog-tile-main small { color: #91a0af; }
+.admin-form-stack { display: contents; }
+.admin-card-menu { display: grid; gap: 10px; align-self: start; position: sticky; top: 16px; }
+.admin-card-menu .secondary { width: 100%; justify-content: flex-start; text-align: left; }
+.admin-card-menu .secondary.active { background: var(--brand-primary, #16a394); border-color: var(--brand-primary, #16a394); color: #fff; }
+.admin-grid > .admin-form-stack > :not(.admin-card-menu) { grid-column: 2; }
+.admin-helper-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin: 8px 0; padding: 10px; border: 1px dashed #d0d5dd; border-radius: 10px; }
+html[data-theme="dark"] .admin-helper-grid { border-color: #344150; }
 .calendar-editor { margin-top: 24px; background: #fff; border: 1px solid #eaecf0; border-radius: 12px; padding: 22px; }
 .calendar-editor h2 { font: 700 18px Manrope; margin: 0 0 6px; }
 .calendar-fields { display: grid; grid-template-columns: 1fr 1.5fr 130px 130px; gap: 12px; margin: 18px 0; }

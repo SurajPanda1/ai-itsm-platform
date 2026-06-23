@@ -412,6 +412,7 @@ function IncidentDetail({
       setBusy(false);
     }
   }
+
   async function updateStatus() {
     setBusy(true);
     setError("");
@@ -871,6 +872,7 @@ function ServiceRequestDetail({
   const [groupId, setGroupId] = useState(request.assignmentGroup?.id || groups[0]?.id || "");
   const [assigneeId, setAssigneeId] = useState(request.assignedTo?.id || "");
   const [note, setNote] = useState("");
+  const [taskEdits, setTaskEdits] = useState<Record<string, { status: string; assignmentGroupId: string; assignedToId: string }>>({});
   const [activeTab, setActiveTab] = useState<"work-notes" | "attachments">("work-notes");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
@@ -928,6 +930,24 @@ function ServiceRequestDetail({
       setNote("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not add activity");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateTask(taskId: string) {
+    const value = taskEdits[taskId];
+    if (!value) return;
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated(await api.updateServiceRequestTask(token, request.id, taskId, {
+        status: value.status,
+        assignmentGroupId: value.assignmentGroupId || undefined,
+        assignedToId: value.assignedToId || undefined,
+      }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update task");
     } finally {
       setBusy(false);
     }
@@ -1015,16 +1035,37 @@ function ServiceRequestDetail({
               <div className="detail-section">
                 <h3>Tasks</h3>
                 <div className="related-list">
-                  {request.serviceRequest.tasks.map((task) => (
-                    <article key={task.id}>
+                  {request.serviceRequest.tasks.map((task) => {
+                    const edit = taskEdits[task.id] || { status: task.status, assignmentGroupId: task.assignmentGroup?.id || "", assignedToId: task.assignedTo?.id || "" };
+                    const taskGroup = groups.find((group) => group.id === edit.assignmentGroupId);
+                    return <article key={task.id}>
                       <b>{task.taskNumber}</b>
                       <div>
                         <strong>{task.title}</strong>
+                        {task.description && <small>{task.description}</small>}
                         <small>{task.assignmentGroup?.name || "No group"} · {task.assignedTo?.name || "Unassigned"}</small>
                       </div>
-                      <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
-                    </article>
-                  ))}
+                      {canEdit ? (
+                        <div className="task-edit-row">
+                          <select value={edit.status} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, status: e.target.value } })}>
+                            <option value="OPEN">Open</option>
+                            <option value="IN_PROGRESS">In progress</option>
+                            <option value="COMPLETED">Completed</option>
+                            <option value="CANCELLED">Cancelled</option>
+                          </select>
+                          <select value={edit.assignmentGroupId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignmentGroupId: e.target.value, assignedToId: "" } })}>
+                            <option value="">No group</option>
+                            {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                          </select>
+                          <select value={edit.assignedToId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignedToId: e.target.value } })}>
+                            <option value="">Unassigned</option>
+                            {taskGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}
+                          </select>
+                          <button className="secondary small" disabled={busy} onClick={() => updateTask(task.id)}>Save</button>
+                        </div>
+                      ) : <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>}
+                    </article>;
+                  })}
                 </div>
               </div>
             )}
