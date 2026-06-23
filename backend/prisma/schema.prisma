@@ -71,6 +71,8 @@ model User {
   specificApprovalRules      ServiceApprovalRule[]   @relation("ServiceApprovalRuleApprover")
   createdRequestTasks        RequestTask[]           @relation("RequestTaskCreator")
   assignedRequestTasks       RequestTask[]           @relation("RequestTaskAssignee")
+  createdProblemTasks        ProblemTask[]           @relation("ProblemTaskCreator")
+  assignedProblemTasks       ProblemTask[]           @relation("ProblemTaskAssignee")
 
   @@map("users")
 }
@@ -151,6 +153,7 @@ model Ticket {
   assignmentGroup   AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
   incident          Incident?
   serviceRequest    ServiceRequest?
+  problem           Problem?
   activities        TicketActivity[]
   slas              TicketSla[]
   attachments       TicketAttachment[]
@@ -200,6 +203,7 @@ model AssignmentGroup {
   serviceCatalogItems ServiceCatalogItem[]
   approvalRules        ServiceApprovalRule[]
   requestTasks         RequestTask[]
+  problemTasks         ProblemTask[]
 
   @@unique([organizationId, name])
   @@map("assignment_groups")
@@ -252,6 +256,21 @@ model Incident {
   ticket          Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@map("incidents")
+}
+
+model Problem {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId          String        @unique @map("ticket_id") @db.Uuid
+  rootCause         String?       @map("root_cause")
+  workaround        String?
+  permanentFix      String?       @map("permanent_fix")
+  knownError        Boolean       @default(false) @map("known_error")
+  resolvedAt        DateTime?     @map("resolved_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  ticket            Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tasks             ProblemTask[]
+
+  @@map("problems")
 }
 
 model ServiceCatalogCategory {
@@ -373,6 +392,29 @@ model RequestTask {
   @@index([serviceRequestId])
   @@index([assignmentGroupId, status])
   @@map("request_tasks")
+}
+
+model ProblemTask {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  problemId         String           @map("problem_id") @db.Uuid
+  taskNumber        String           @unique @map("task_number") @db.VarChar(20)
+  title             String           @db.VarChar(200)
+  description       String?
+  assignmentGroupId String?          @map("assignment_group_id") @db.Uuid
+  assignedToId      String?          @map("assigned_to") @db.Uuid
+  status            String           @default("OPEN") @db.VarChar(30)
+  createdById       String           @map("created_by") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @default(now()) @map("updated_at")
+  completedAt       DateTime?        @map("completed_at")
+  problem           Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  assignmentGroup   AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
+  assignedTo        User?            @relation("ProblemTaskAssignee", fields: [assignedToId], references: [id])
+  createdBy         User             @relation("ProblemTaskCreator", fields: [createdById], references: [id])
+
+  @@index([problemId])
+  @@index([assignmentGroupId, status])
+  @@map("problem_tasks")
 }
 
 model ActivityType {

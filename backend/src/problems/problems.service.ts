@@ -1,0 +1,163 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { AuthUser } from '../auth/auth-user';
+import { employeeTicketScope, requireServiceDeskRole } from '../common/ticket-access.policy';
+import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
+import { AddCommentDto, AssignIncidentDto, ChangeStatusDto } from '../incidents/dto/incident-actions.dto';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateProblemDto, CreateProblemTaskDto, UpdateProblemDto, UpdateProblemTaskDto } from './dto/problem.dto';
+
+const problemInclude = {
+  status: true,
+  priority: true,
+  ticketType: true,
+  createdBy: { select: { id: true, name: true, email: true } },
+  assignedTo: { select: { id: true, name: true, email: true } },
+  assignmentGroup: { select: { id: true, name: true } },
+  problem: { include: { tasks: { include: { assignmentGroup: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' as const } } } },
+  activities: { include: { createdBy: { select: { id: true, name: true } }, activityType: true }, orderBy: { createdAt: 'desc' as const } },
+  slas: { include: { definition: { select: { id: true, name: true, version: true } } }, orderBy: { createdAt: 'desc' as const } },
+} satisfies Prisma.TicketInclude;
+
+@Injectable()
+export class ProblemsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(user: AuthUser, dto: CreateProblemDto) {
+    requireServiceDeskRole(user);
+    const [dbUser, status, type, priority] = await Promise.all([
+      this.prisma.user.findFirst({ where: { id: user.id, organizationId: user.organizationId } }),
+      this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'OPEN' } } }),
+      this.prisma.ticketType.findUnique({ where: { name: 'PROBLEM' } }),
+      this.prisma.priority.findUnique({ where: { name: dto.priority } }),
+    ]);
+    if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
+    if (!status || !type || !priority) throw new BadRequestException('Required problem lookup data is missing');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('ticket_number:PRB'))`;
+      const [sequence] = await tx.$queryRaw<{ next: number }[]>`
+        SELECT (COALESCE(MAX(CAST(SUBSTRING(ticket_number FROM 4) AS INTEGER)), 0) + 1)::integer AS next
+        FROM tickets
+        WHERE ticket_number ~ '^PRB[0-9]{6}$'
+      `;
+      const ticketNumber = `PRB${sequence.next.toString().padStart(6, '0')}`;
+      const ticket = await tx.ticket.create({
+        data: {
+          organizationId: user.organizationId,
+          createdById: user.id,
+          ticketNumber,
+          title: dto.title,
+          description: dto.description,
+          statusId: status.id,
+          ticketTypeId: type.id,
+          priorityId: priority.id,
+          problem: { create: { rootCause: dto.rootCause, workaround: dto.workaround, permanentFix: dto.permanentFix, knownError: dto.knownError ?? false } },
+        },
+        include: problemInclude,
+      });
+      await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE_PROBLEM', newValue: { ticketNumber, title: ticket.title }, changedById: user.id } });
+      return ticket;
+    });
+  }
+
+  findAll(user: AuthUser) {
+    return this.prisma.ticket.findMany({ where: { organizationId: user.organizationId, ticketType: { name: 'PROBLEM' }, ...employeeTicketScope(user) }, include: problemInclude, orderBy: { createdAt: 'desc' } });
+  }
+
+  async findOne(user: AuthUser, id: string) {
+    const ticket = await this.prisma.ticket.findFirst({ where: { id, organizationId: user.organizationId, ticketType: { name: 'PROBLEM' }, ...employeeTicketScope(user) }, include: problemInclude });
+    if (!ticket) throw new NotFoundException('Problem not found');
+    return ticket;
+  }
+
+  async update(user: AuthUser, id: string, dto: UpdateProblemDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.findOne(user, id);
+    const priority = dto.priority ? await this.prisma.priority.findUnique({ where: { name: dto.priority } }) : null;
+    if (dto.priority && !priority) throw new BadRequestException('Unknown priority');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.problem.update({ where: { ticketId: id }, data: { rootCause: dto.rootCause, workaround: dto.workaround, permanentFix: dto.permanentFix, knownError: dto.knownError } });
+      const updated = await tx.ticket.update({ where: { id }, data: { title: dto.title, description: dto.description, priorityId: priority?.id, updatedAt: new Date() }, include: problemInclude });
+      await tx.auditLog.create({ data: { organizationId: ticket.organizationId, tableName: 'tickets', recordId: id, action: 'UPDATE_PROBLEM', newValue: dto as Prisma.InputJsonValue, changedById: user.id } });
+      return updated;
+    });
+  }
+
+  async assign(user: AuthUser, id: string, dto: AssignIncidentDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.findOne(user, id);
+    const group = await this.ensureGroup(ticket.organizationId, dto.assignmentGroupId);
+    const membership = await this.prisma.assignmentGroupMember.findUnique({ where: { assignmentGroupId_userId: { assignmentGroupId: dto.assignmentGroupId, userId: dto.assignedToId } } });
+    if (!membership) throw new BadRequestException('Assignee must be a member of the assignment group');
+    return this.prisma.$transaction(async (tx) => {
+      const activityType = await tx.activityType.findUnique({ where: { name: 'ASSIGNMENT_CHANGE' } });
+      await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Problem assigned to ${group.name}`, activityTypeId: activityType?.id } });
+      return tx.ticket.update({ where: { id }, data: { assignmentGroupId: dto.assignmentGroupId, assignedToId: dto.assignedToId, updatedAt: new Date() }, include: problemInclude });
+    });
+  }
+
+  async changeStatus(user: AuthUser, id: string, dto: ChangeStatusDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.findOne(user, id);
+    enforceClosedTicketPolicy(user, ticket.status?.name, dto.status);
+    const status = await this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: dto.status } } });
+    if (!status) throw new BadRequestException(`Unknown ticket status: ${dto.status}`);
+    return this.prisma.$transaction(async (tx) => {
+      const activityType = await tx.activityType.findUnique({ where: { name: 'STATUS_CHANGE' } });
+      await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Problem status changed from ${ticket.status?.name ?? 'unset'} to ${dto.status}`, activityTypeId: activityType?.id } });
+      if (dto.status === 'RESOLVED' || dto.status === 'CLOSED') await tx.problem.update({ where: { ticketId: id }, data: { resolvedAt: new Date() } });
+      return tx.ticket.update({ where: { id }, data: { statusId: status.id, updatedAt: new Date() }, include: problemInclude });
+    });
+  }
+
+  async addComment(user: AuthUser, id: string, dto: AddCommentDto) {
+    await this.findOne(user, id);
+    if (dto.type === 'WORK_NOTE') requireServiceDeskRole(user);
+    const activityType = await this.prisma.activityType.findUnique({ where: { name: dto.type } });
+    return this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: dto.comment, activityTypeId: activityType?.id } });
+  }
+
+  async createTask(user: AuthUser, id: string, dto: CreateProblemTaskDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.findOne(user, id);
+    if (!ticket.problem) throw new NotFoundException('Problem not found');
+    if (dto.assignmentGroupId) await this.ensureGroup(ticket.organizationId, dto.assignmentGroupId);
+    if (dto.assignedToId) await this.ensureUser(ticket.organizationId, dto.assignedToId);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('problem_task_number:PTASK'))`;
+      const [sequence] = await tx.$queryRaw<{ next: number }[]>`
+        SELECT (COALESCE(MAX(CAST(SUBSTRING(task_number FROM 6) AS INTEGER)), 0) + 1)::integer AS next
+        FROM problem_tasks
+        WHERE task_number ~ '^PTASK[0-9]{6}$'
+      `;
+      await tx.problemTask.create({ data: { problemId: ticket.problem!.id, taskNumber: `PTASK${sequence.next.toString().padStart(6, '0')}`, title: dto.title, description: dto.description, assignmentGroupId: dto.assignmentGroupId, assignedToId: dto.assignedToId, createdById: user.id } });
+      await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Problem task created: ${dto.title}` } });
+      return tx.ticket.findUniqueOrThrow({ where: { id }, include: problemInclude });
+    });
+  }
+
+  async updateTask(user: AuthUser, id: string, taskId: string, dto: UpdateProblemTaskDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.findOne(user, id);
+    if (!ticket.problem) throw new NotFoundException('Problem not found');
+    const task = await this.prisma.problemTask.findFirst({ where: { id: taskId, problemId: ticket.problem.id } });
+    if (!task) throw new NotFoundException('Problem task not found');
+    if (dto.assignmentGroupId) await this.ensureGroup(ticket.organizationId, dto.assignmentGroupId);
+    if (dto.assignedToId) await this.ensureUser(ticket.organizationId, dto.assignedToId);
+    await this.prisma.problemTask.update({ where: { id: taskId }, data: { title: dto.title, description: dto.description, assignmentGroupId: dto.assignmentGroupId, assignedToId: dto.assignedToId, status: dto.status, completedAt: dto.status === 'COMPLETED' ? new Date() : dto.status ? null : undefined, updatedAt: new Date() } });
+    await this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Problem task ${task.taskNumber} updated${dto.status ? ` to ${dto.status}` : ''}` } });
+    return this.findOne(user, id);
+  }
+
+  private async ensureGroup(organizationId: string, id: string) {
+    const group = await this.prisma.assignmentGroup.findFirst({ where: { id, organizationId, active: true } });
+    if (!group) throw new BadRequestException('Assignment group does not belong to this organization');
+    return group;
+  }
+
+  private async ensureUser(organizationId: string, id: string) {
+    const user = await this.prisma.user.findFirst({ where: { id, organizationId, active: true } });
+    if (!user) throw new BadRequestException('Assignee must be an active user in this organization');
+    return user;
+  }
+}

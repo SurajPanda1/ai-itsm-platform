@@ -18,6 +18,7 @@ Completed in the current MVP:
 - Incident creation, listing, details, editing, assignment, status, resolution, comments, and work notes
 - Service Catalogue with category tiles, catalogue items, default routing groups, approval rules, admin-friendly form-field helpers, task-template helpers, and employee service request submission/listing
 - Service Request fulfilment with approvals, approval decisions, generated request tasks, task assignment, task status updates, work notes, attachments, and SLA snapshots
+- Problem Management foundation with PRB records, root cause, workaround, permanent fix, known-error flag, assignment/status/work notes, and PTasks
 - Sequential incident numbers such as `INC000002`
 - Assignment groups and group membership
 - Related child incidents, changes, and problems
@@ -33,7 +34,7 @@ Completed in the current MVP:
 - Admin Console for users, departments, assignment groups, service catalogue, approval rules, SLA policies, business calendars, branding, theme defaults, and attachment storage
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
-Problem, change, CMDB, knowledge, notifications, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests now have the first request-to-fulfilment workflow, but richer dynamic form rendering, approval maintenance, request-task reporting, and production-grade workflow automation are still upcoming.
+Change, CMDB, knowledge, notifications, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests and Problems now have first workflow slices, but richer workflow automation, reporting, and cross-module analytics are still upcoming.
 
 ## Architecture
 
@@ -112,6 +113,7 @@ npx.cmd prisma db execute --file prisma/manual/011_nextris_dark_theme.sql --sche
 npx.cmd prisma db execute --file prisma/manual/012_service_catalog_requests.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/013_approval_task_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/014_user_group_department_admin.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/015_problem_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -187,6 +189,18 @@ Service Requests:
 - `POST /api/service-requests/:id/comments`
 - `PATCH /api/service-requests/:id/approvals/:approvalId`
 - `PATCH /api/service-requests/:id/tasks/:taskId`
+
+Problems:
+
+- `POST /api/problems`
+- `GET /api/problems`
+- `GET /api/problems/:id`
+- `PATCH /api/problems/:id`
+- `PATCH /api/problems/:id/assignment`
+- `PATCH /api/problems/:id/status`
+- `POST /api/problems/:id/comments`
+- `POST /api/problems/:id/tasks`
+- `PATCH /api/problems/:id/tasks/:taskId`
 
 Supporting endpoints:
 
@@ -276,6 +290,7 @@ Before production use, the project still requires automated tests, managed migra
 1. Add browser-level regression tests for incident, service request, approval, request task, attachment, branding, Admin Console, and Analytics workflows.
 2. Improve the Service Request form renderer so catalogue form schema fields are shown to employees as real dynamic fields.
 3. Add approval-rule list/edit/deactivate screens and richer request-task reporting.
-4. Implement Problem and Change modules, including change approvals and risk workflows.
-5. Implement CMDB and knowledge management.
-6. Add notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.
+4. Expand Problem Management with known-error database behavior, root-cause analytics, and incident-to-problem workflows.
+5. Implement Change Management, including change approvals and risk workflows.
+6. Implement CMDB and knowledge management.
+7. Add notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.

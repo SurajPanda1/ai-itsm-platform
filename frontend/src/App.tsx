@@ -334,6 +334,37 @@ function CreateServiceRequest({
   );
 }
 
+function CreateProblem({ token, onCreated, onClose }: { token: string; onCreated: (i: Incident) => void; onClose: () => void }) {
+  const [form, setForm] = useState({ title: "", description: "", priority: "MEDIUM", rootCause: "", workaround: "", permanentFix: "", knownError: false });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      onCreated(await api.createProblem(token, form));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create problem");
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="modal" onSubmit={submit}>
+        <div className="modal-head"><div><p className="eyebrow">PROBLEM MANAGEMENT</p><h2>Create problem</h2></div><button type="button" className="icon-button" onClick={onClose}>×</button></div>
+        <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} minLength={3} maxLength={200} required autoFocus /></label>
+        <label>Description<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></label>
+        <label>Priority<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
+        <label>Root cause<textarea value={form.rootCause} onChange={(e) => setForm({ ...form, rootCause: e.target.value })} rows={3} /></label>
+        <label>Workaround<textarea value={form.workaround} onChange={(e) => setForm({ ...form, workaround: e.target.value })} rows={3} /></label>
+        <label>Permanent fix<textarea value={form.permanentFix} onChange={(e) => setForm({ ...form, permanentFix: e.target.value })} rows={3} /></label>
+        <label className="check-row"><input type="checkbox" checked={form.knownError} onChange={(e) => setForm({ ...form, knownError: e.target.checked })} />Known error</label>
+        {error && <div className="error">{error}</div>}
+        <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Creating…" : "Create problem"}</button></div>
+      </form>
+    </div>
+  );
+}
+
 function IncidentDetail({
   incident,
   token,
@@ -1176,6 +1207,55 @@ function ServiceRequestDetail({
   );
 }
 
+function ProblemDetail({ problem, token, canEdit, canReopen, groups, onUpdated, onClose }: { problem: Incident; token: string; canEdit: boolean; canReopen: boolean; groups: AssignmentGroup[]; onUpdated: (value: Incident) => void; onClose: () => void }) {
+  const [form, setForm] = useState({ title: problem.title, description: problem.description || "", priority: problem.priority?.name || "MEDIUM", rootCause: problem.problem?.rootCause || "", workaround: problem.problem?.workaround || "", permanentFix: problem.problem?.permanentFix || "", knownError: problem.problem?.knownError || false });
+  const [status, setStatus] = useState(problem.status?.name || "OPEN");
+  const [groupId, setGroupId] = useState(problem.assignmentGroup?.id || groups[0]?.id || "");
+  const [assigneeId, setAssigneeId] = useState(problem.assignedTo?.id || "");
+  const [note, setNote] = useState("");
+  const [taskDraft, setTaskDraft] = useState({ title: "", description: "", assignmentGroupId: "", assignedToId: "" });
+  const [taskEdits, setTaskEdits] = useState<Record<string, { status: string; assignmentGroupId: string; assignedToId: string }>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const selectedGroup = groups.find((group) => group.id === groupId);
+  async function save() { setBusy(true); setError(""); try { onUpdated(await api.updateProblem(token, problem.id, form)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem"); } finally { setBusy(false); } }
+  async function updateStatus() { setBusy(true); setError(""); try { onUpdated(await api.changeProblemStatus(token, problem.id, status)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update status"); } finally { setBusy(false); } }
+  async function assign() { if(!groupId||!assigneeId)return; setBusy(true); setError(""); try { onUpdated(await api.assignProblem(token, problem.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
+  async function addNote() { if(!note.trim())return; setBusy(true); setError(""); try { await api.addProblemActivity(token, problem.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.problems(token); const value = refreshed.find((item)=>item.id===problem.id); if(value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
+  async function createTask() { if(!taskDraft.title.trim())return; setBusy(true); setError(""); try { onUpdated(await api.createProblemTask(token, problem.id, { ...taskDraft, assignmentGroupId: taskDraft.assignmentGroupId || undefined, assignedToId: taskDraft.assignedToId || undefined })); setTaskDraft({ title: "", description: "", assignmentGroupId: "", assignedToId: "" }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create problem task"); } finally { setBusy(false); } }
+  async function updateTask(taskId: string) { const value = taskEdits[taskId]; if(!value)return; setBusy(true); setError(""); try { onUpdated(await api.updateProblemTask(token, problem.id, taskId, { status: value.status, assignmentGroupId: value.assignmentGroupId || undefined, assignedToId: value.assignedToId || undefined })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem task"); } finally { setBusy(false); } }
+  return <div className="modal-backdrop" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><section className="modal detail-modal">
+    <div className="modal-head"><div><p className="eyebrow">{problem.ticketNumber}</p><h2>{problem.title}</h2></div><button type="button" className="icon-button" onClick={onClose}>×</button></div>
+    {error&&<div className="error">{error}</div>}
+    <div className="operations-grid"><div>
+      <div className="detail-section"><h3>Problem details</h3>
+        {canEdit ? <>
+          <label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
+          <label>Description<textarea rows={3} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
+          <label>Priority<select value={form.priority} onChange={(e)=>setForm({...form,priority:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
+          <label>Root cause<textarea rows={3} value={form.rootCause} onChange={(e)=>setForm({...form,rootCause:e.target.value})}/></label>
+          <label>Workaround<textarea rows={3} value={form.workaround} onChange={(e)=>setForm({...form,workaround:e.target.value})}/></label>
+          <label>Permanent fix<textarea rows={3} value={form.permanentFix} onChange={(e)=>setForm({...form,permanentFix:e.target.value})}/></label>
+          <label className="check-row"><input type="checkbox" checked={form.knownError} onChange={(e)=>setForm({...form,knownError:e.target.checked})}/>Known error</label>
+          <button className="primary" disabled={busy} onClick={save}>Save problem</button>
+        </> : <>
+          <p>{problem.description || "No description provided."}</p>
+          <dl><dt>Root cause</dt><dd>{problem.problem?.rootCause || "Not documented"}</dd><dt>Workaround</dt><dd>{problem.problem?.workaround || "Not documented"}</dd><dt>Permanent fix</dt><dd>{problem.problem?.permanentFix || "Not documented"}</dd></dl>
+        </>}
+      </div>
+      <div className="detail-section"><h3>PTasks</h3>
+        {canEdit&&<div className="admin-helper-grid"><input placeholder="Task title" value={taskDraft.title} onChange={(e)=>setTaskDraft({...taskDraft,title:e.target.value})}/><input placeholder="Task description" value={taskDraft.description} onChange={(e)=>setTaskDraft({...taskDraft,description:e.target.value})}/><select value={taskDraft.assignmentGroupId} onChange={(e)=>setTaskDraft({...taskDraft,assignmentGroupId:e.target.value,assignedToId:""})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><button className="secondary small" onClick={createTask} disabled={busy}>Open PTask</button></div>}
+        <div className="related-list">{problem.problem?.tasks?.length ? problem.problem.tasks.map((task)=>{ const edit=taskEdits[task.id]||{status:task.status,assignmentGroupId:task.assignmentGroup?.id||"",assignedToId:task.assignedTo?.id||""}; const taskGroup=groups.find((g)=>g.id===edit.assignmentGroupId); return <article key={task.id}><b>{task.taskNumber}</b><div><strong>{task.title}</strong>{task.description&&<small>{task.description}</small>}<small>{task.assignmentGroup?.name||"No group"} · {task.assignedTo?.name||"Unassigned"}</small></div>{canEdit?<div className="task-edit-row"><select value={edit.status} onChange={(e)=>setTaskEdits({...taskEdits,[task.id]:{...edit,status:e.target.value}})}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={edit.assignmentGroupId} onChange={(e)=>setTaskEdits({...taskEdits,[task.id]:{...edit,assignmentGroupId:e.target.value,assignedToId:""}})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={edit.assignedToId} onChange={(e)=>setTaskEdits({...taskEdits,[task.id]:{...edit,assignedToId:e.target.value}})}><option value="">Unassigned</option>{taskGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary small" onClick={()=>updateTask(task.id)} disabled={busy}>Save</button></div>:<span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>}</article>}) : <p className="muted">No PTasks opened yet.</p>}</div>
+      </div>
+    </div><div>
+      {canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}
+      {canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="AWAITING_CUSTOMER">Awaiting customer</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{problem.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an administrator can reopen a closed problem.</p>}</div>}
+      <div className="detail-section"><h3>{canEdit ? "Add work note" : "Add comment"}</h3><textarea rows={4} value={note} onChange={(e)=>setNote(e.target.value)}/><button className="secondary" disabled={!note.trim()||busy} onClick={addNote}>Save note</button></div>
+      <div className="detail-section"><h3>Activity</h3><div className="activity-list">{problem.activities.map((a)=><article key={a.id}><b>{a.createdBy.name}</b><span>{a.activityType?.name||"ACTIVITY"} · {new Date(a.createdAt).toLocaleString()}</span><p>{a.comment}</p></article>)}</div></div>
+    </div></div>
+  </section></div>;
+}
+
 function AdminConsole({
   token,
   onClose,
@@ -1618,14 +1698,20 @@ function AdminConsole({
 function Dashboard({ session, onLogout, branding, themePreference, onThemePreferenceChange }: { session: Session; onLogout: () => void; branding: Branding; themePreference: ThemePreference; onThemePreferenceChange: (value: ThemePreference) => void }) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [serviceRequests, setServiceRequests] = useState<Incident[]>([]);
+  const [problems, setProblems] = useState<Incident[]>([]);
   const [catalog, setCatalog] = useState<ServiceCatalogCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [creatingRequest, setCreatingRequest] = useState(false);
+  const [creatingProblem, setCreatingProblem] = useState(false);
   const [selected, setSelected] = useState<Incident | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<Incident | null>(null);
-  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS">(() => localStorage.getItem(modulePreferenceKey) === "REQUESTS" ? "REQUESTS" : "INCIDENTS");
+  const [selectedProblem, setSelectedProblem] = useState<Incident | null>(null);
+  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS" | "PROBLEMS">(() => {
+    const saved = localStorage.getItem(modulePreferenceKey);
+    return saved === "REQUESTS" || saved === "PROBLEMS" ? saved : "INCIDENTS";
+  });
   const canOperate = session.user.roles.some((role) =>
     ["IT_AGENT", "IT_SERVICE_MANAGER", "ADMIN"].includes(role),
   );
@@ -1642,11 +1728,13 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
     Promise.all([
       api.incidents(session.accessToken),
       api.serviceRequests(session.accessToken),
+      api.problems(session.accessToken),
       api.serviceCatalog(session.accessToken),
     ])
-      .then(([incidentValues, requestValues, catalogValues]) => {
+      .then(([incidentValues, requestValues, problemValues, catalogValues]) => {
         setIncidents(incidentValues);
         setServiceRequests(requestValues);
+        setProblems(problemValues);
         setCatalog(catalogValues);
       })
       .catch((e) => setError(e.message))
@@ -1679,6 +1767,15 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
     }),
     [catalog, serviceRequests],
   );
+  const problemStats = useMemo(
+    () => ({
+      open: problems.filter((i) => !["RESOLVED", "CLOSED"].includes(i.status?.name || "")).length,
+      inProgress: problems.filter((i) => i.status?.name === "IN_PROGRESS").length,
+      knownErrors: problems.filter((i) => i.problem?.knownError).length,
+      total: problems.length,
+    }),
+    [problems],
+  );
   const visibleIncidents = useMemo(
     () =>
       incidents.filter((incident) => {
@@ -1709,6 +1806,21 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
       }),
     [serviceRequests, search, statusFilter],
   );
+  const visibleProblems = useMemo(
+    () =>
+      problems.filter((problem) => {
+        const term = search.toLowerCase();
+        const matchesText =
+          !term ||
+          problem.ticketNumber.toLowerCase().includes(term) ||
+          problem.title.toLowerCase().includes(term) ||
+          problem.problem?.rootCause?.toLowerCase().includes(term);
+        const matchesStatus =
+          statusFilter === "ALL" || problem.status?.name === statusFilter;
+        return matchesText && matchesStatus;
+      }),
+    [problems, search, statusFilter],
+  );
   return (
     <div className="app-shell">
       <aside>
@@ -1720,7 +1832,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           <a className={activeModule === "REQUESTS" ? "active" : ""} onClick={() => setActiveModule("REQUESTS")}>
             ⌁ <span>Service requests</span>
           </a>
-          <a>
+          <a className={activeModule === "PROBLEMS" ? "active" : ""} onClick={() => setActiveModule("PROBLEMS")}>
             ◇ <span>Problems</span>
           </a>
           <a>
@@ -1777,46 +1889,48 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
             <p className="eyebrow">
               {isEmployee ? "EMPLOYEE SUPPORT" : "SERVICE OPERATIONS"}
             </p>
-            <h1>{activeModule === "REQUESTS" ? (isEmployee ? "My service requests" : "Service requests") : (isEmployee ? "My incidents" : "Incidents")}</h1>
+            <h1>{activeModule === "REQUESTS" ? (isEmployee ? "My service requests" : "Service requests") : activeModule === "PROBLEMS" ? "Problems" : (isEmployee ? "My incidents" : "Incidents")}</h1>
             <p>
               {activeModule === "REQUESTS"
                 ? "Browse catalogue requests and track fulfilment."
+                : activeModule === "PROBLEMS"
+                ? "Investigate recurring issues, document root cause, and coordinate PTasks."
                 : isEmployee
                 ? "Report issues and follow their progress."
                 : "Track interruptions and restore service quickly."}
             </p>
           </div>
-          <button className="primary compact" onClick={() => activeModule === "REQUESTS" ? setCreatingRequest(true) : setCreating(true)}>
-            {activeModule === "REQUESTS" ? "＋ New request" : "＋ New incident"}
+          <button className="primary compact" onClick={() => activeModule === "REQUESTS" ? setCreatingRequest(true) : activeModule === "PROBLEMS" ? setCreatingProblem(true) : setCreating(true)}>
+            {activeModule === "REQUESTS" ? "＋ New request" : activeModule === "PROBLEMS" ? "＋ New problem" : "＋ New incident"}
           </button>
         </header>
         <section className="stats">
           <article>
             <span>Open</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.open : stats.open}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.open : activeModule === "PROBLEMS" ? problemStats.open : stats.open}</strong>
             <small>Awaiting action</small>
           </article>
           <article>
             <span>In progress</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.inProgress : stats.active}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.inProgress : activeModule === "PROBLEMS" ? problemStats.inProgress : stats.active}</strong>
             <small>Work underway</small>
           </article>
           <article>
-            <span>{activeModule === "REQUESTS" ? "Catalogue items" : "Critical"}</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.catalogItems : stats.critical}</strong>
-            <small>{activeModule === "REQUESTS" ? "Available request types" : "Highest priority"}</small>
+            <span>{activeModule === "REQUESTS" ? "Catalogue items" : activeModule === "PROBLEMS" ? "Known errors" : "Critical"}</span>
+            <strong>{activeModule === "REQUESTS" ? requestStats.catalogItems : activeModule === "PROBLEMS" ? problemStats.knownErrors : stats.critical}</strong>
+            <small>{activeModule === "REQUESTS" ? "Available request types" : activeModule === "PROBLEMS" ? "Documented known errors" : "Highest priority"}</small>
           </article>
           <article>
             <span>Total</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.total : incidents.length}</strong>
-            <small>{activeModule === "REQUESTS" ? "All requests" : "All incidents"}</small>
+            <strong>{activeModule === "REQUESTS" ? requestStats.total : activeModule === "PROBLEMS" ? problemStats.total : incidents.length}</strong>
+            <small>{activeModule === "REQUESTS" ? "All requests" : activeModule === "PROBLEMS" ? "All problems" : "All incidents"}</small>
           </article>
         </section>
         <section className="table-card">
           <div className="table-head">
             <div>
-              <h2>{activeModule === "REQUESTS" ? "Request queue" : "Incident queue"}</h2>
-              <p>{activeModule === "REQUESTS" ? "Service requests for your scope" : "All incidents in your organization"}</p>
+              <h2>{activeModule === "REQUESTS" ? "Request queue" : activeModule === "PROBLEMS" ? "Problem queue" : "Incident queue"}</h2>
+              <p>{activeModule === "REQUESTS" ? "Service requests for your scope" : activeModule === "PROBLEMS" ? "Problems for investigation and root cause tracking" : "All incidents in your organization"}</p>
             </div>
             <div className="queue-filters">
               <select
@@ -1838,17 +1952,17 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                 className="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={activeModule === "REQUESTS" ? "Search requests" : "Search incidents"}
+                placeholder={activeModule === "REQUESTS" ? "Search requests" : activeModule === "PROBLEMS" ? "Search problems" : "Search incidents"}
               />
             </div>
           </div>
           {loading ? (
-            <div className="empty">{activeModule === "REQUESTS" ? "Loading requests…" : "Loading incidents…"}</div>
+            <div className="empty">{activeModule === "REQUESTS" ? "Loading requests…" : activeModule === "PROBLEMS" ? "Loading problems…" : "Loading incidents…"}</div>
           ) : error ? (
             <div className="error table-error">{error}</div>
-          ) : (activeModule === "REQUESTS" ? visibleServiceRequests.length : visibleIncidents.length) === 0 ? (
+          ) : (activeModule === "REQUESTS" ? visibleServiceRequests.length : activeModule === "PROBLEMS" ? visibleProblems.length : visibleIncidents.length) === 0 ? (
             <div className="empty">
-              <b>{activeModule === "REQUESTS" ? "No matching requests" : "No matching incidents"}</b>
+              <b>{activeModule === "REQUESTS" ? "No matching requests" : activeModule === "PROBLEMS" ? "No matching problems" : "No matching incidents"}</b>
               <span>Try changing your search or filter.</span>
             </div>
           ) : (
@@ -1857,7 +1971,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                 <thead>
                   <tr>
                     <th>Number</th>
-                    <th>{activeModule === "REQUESTS" ? "Request" : "Incident"}</th>
+                    <th>{activeModule === "REQUESTS" ? "Request" : activeModule === "PROBLEMS" ? "Problem" : "Incident"}</th>
                     <th>Status</th>
                     <th>Priority</th>
                     <th>Assignee</th>
@@ -1865,12 +1979,12 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                   </tr>
                 </thead>
                 <tbody>
-                  {(activeModule === "REQUESTS" ? visibleServiceRequests : visibleIncidents).map((i) => (
+                  {(activeModule === "REQUESTS" ? visibleServiceRequests : activeModule === "PROBLEMS" ? visibleProblems : visibleIncidents).map((i) => (
                     <tr key={i.id}>
                       <td>
                         <button
                           className="ticket-link"
-                          onClick={() => activeModule === "REQUESTS" ? setSelectedRequest(i) : setSelected(i)}
+                          onClick={() => activeModule === "REQUESTS" ? setSelectedRequest(i) : activeModule === "PROBLEMS" ? setSelectedProblem(i) : setSelected(i)}
                         >
                           {i.ticketNumber}
                         </button>
@@ -1878,7 +1992,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                       <td>
                         <strong>{i.title}</strong>
                         <small>
-                          {activeModule === "REQUESTS" ? i.serviceRequest?.catalogItem?.name || "Service request" : i.incident?.affectedService || "General service"}
+                          {activeModule === "REQUESTS" ? i.serviceRequest?.catalogItem?.name || "Service request" : activeModule === "PROBLEMS" ? i.problem?.knownError ? "Known error" : "Root cause investigation" : i.incident?.affectedService || "General service"}
                         </small>
                       </td>
                       <td>
@@ -1931,6 +2045,17 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           }}
         />
       )}
+      {creatingProblem && (
+        <CreateProblem
+          token={session.accessToken}
+          onClose={() => setCreatingProblem(false)}
+          onCreated={(problem) => {
+            setProblems((x) => [problem, ...x]);
+            setCreatingProblem(false);
+            setActiveModule("PROBLEMS");
+          }}
+        />
+      )}
       {selected && (
         <IncidentDetail
           incident={selected}
@@ -1959,6 +2084,22 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           onUpdated={(updated) => {
             setSelectedRequest(updated);
             setServiceRequests((items) =>
+              items.map((item) => (item.id === updated.id ? updated : item)),
+            );
+          }}
+        />
+      )}
+      {selectedProblem && (
+        <ProblemDetail
+          problem={selectedProblem}
+          token={session.accessToken}
+          canEdit={canOperate}
+          canReopen={isAdmin}
+          groups={groups}
+          onClose={() => setSelectedProblem(null)}
+          onUpdated={(updated) => {
+            setSelectedProblem(updated);
+            setProblems((items) =>
               items.map((item) => (item.id === updated.id ? updated : item)),
             );
           }}

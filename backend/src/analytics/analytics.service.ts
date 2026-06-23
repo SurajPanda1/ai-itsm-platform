@@ -13,7 +13,7 @@ export class AnalyticsService {
     const unrestricted=user.roles.includes(Roles.Admin)||user.roles.includes(Roles.ServiceManager);
     const memberships=unrestricted?[]:await this.prisma.assignmentGroupMember.findMany({where:{userId:user.id},select:{assignmentGroupId:true}});
     const groupIds=memberships.map(value=>value.assignmentGroupId);
-    const ticketTypeName=filters.module==='SERVICE_REQUEST'?'SERVICE_REQUEST':'INCIDENT';
+    const ticketTypeName=filters.module==='SERVICE_REQUEST'?'SERVICE_REQUEST':filters.module==='PROBLEM'?'PROBLEM':'INCIDENT';
     const where:Prisma.TicketWhereInput={organizationId:user.organizationId,ticketType:{name:ticketTypeName},createdAt:{gte:from,lte:to},...(unrestricted?{}:{assignmentGroupId:{in:groupIds}}),...(filters.status?{status:{name:filters.status}}:{}),...(filters.priorityId?{priorityId:filters.priorityId}:{}),...(filters.groupId?{assignmentGroupId:filters.groupId}:{}),...(filters.assigneeId?{assignedToId:filters.assigneeId}:{})};
     const [tickets,groups,priorities,assignees]=await Promise.all([
       this.prisma.ticket.findMany({where,select:{id:true,ticketNumber:true,title:true,createdAt:true,status:{select:{name:true}},priority:{select:{id:true,name:true}},assignmentGroup:{select:{id:true,name:true}},assignedTo:{select:{id:true,name:true}},incident:{select:{resolvedAt:true}},slas:{select:{status:true,startedAt:true,firstRespondedAt:true,resolvedAt:true,totalPausedSeconds:true}}},orderBy:{createdAt:'desc'}}),

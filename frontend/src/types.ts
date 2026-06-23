@@ -1,11 +1,12 @@
 export interface User { id: string; name: string; email: string; roles: string[] }
 export interface Branding { organizationName: string; logoUrl?: string; faviconUrl?: string; primaryColor?: string; accentColor?: string; portalTitle?: string; welcomeMessage?: string; supportEmail?: string; supportPhone?: string; showPoweredBy?: boolean; themeMode?: 'DARK'|'LIGHT'|'SYSTEM' }
 export interface Attachment { id: string; fileName: string; contentType: string; sizeBytes: number; createdAt: string; uploadedBy: { id: string; name: string } }
-export interface AnalyticsReport { scope:'ORGANIZATION'|'MY_GROUPS';module?:'INCIDENT'|'SERVICE_REQUEST';period:{from:string;to:string};kpis:{total:number;open:number;resolved:number;critical:number;averageResponseMinutes:number|null;averageResolutionMinutes:number|null;slaMet:number;slaAtRisk:number;slaBreached:number};byStatus:{name:string;value:number}[];byPriority:{name:string;value:number}[];byGroup:{name:string;value:number}[];byAssignee:{name:string;value:number}[];trend:{date:string;created:number;resolved:number}[];aging:{name:string;value:number}[];filters:{groups:{id:string;name:string}[];priorities:{id:string;name:string}[];assignees:{id:string;name:string}[]}}
+export interface AnalyticsReport { scope:'ORGANIZATION'|'MY_GROUPS';module?:'INCIDENT'|'SERVICE_REQUEST'|'PROBLEM';period:{from:string;to:string};kpis:{total:number;open:number;resolved:number;critical:number;averageResponseMinutes:number|null;averageResolutionMinutes:number|null;slaMet:number;slaAtRisk:number;slaBreached:number};byStatus:{name:string;value:number}[];byPriority:{name:string;value:number}[];byGroup:{name:string;value:number}[];byAssignee:{name:string;value:number}[];trend:{date:string;created:number;resolved:number}[];aging:{name:string;value:number}[];filters:{groups:{id:string;name:string}[];priorities:{id:string;name:string}[];assignees:{id:string;name:string}[]}}
 export interface Session { accessToken: string; user: User }
 export interface AssignmentGroup { id: string; name: string; description?: string; members: { user: Pick<User, 'id' | 'name' | 'email'> }[] }
 export interface ServiceApprovalRule { id: string; sequence: number; approvalType: 'MANAGER'|'GROUP'|'SPECIFIC_USER'; approvalGroupId?: string; specificApproverId?: string; active: boolean; approvalGroup?: { id: string; name: string }; specificApprover?: Pick<User, 'id' | 'name' | 'email'> }
 export interface RequestTask { id: string; taskNumber: string; title: string; description?: string; status: string; createdAt: string; assignmentGroup?: { id: string; name: string }; assignedTo?: Pick<User, 'id' | 'name' | 'email'> }
+export interface ProblemTask { id: string; taskNumber: string; title: string; description?: string; status: string; createdAt: string; assignmentGroup?: { id: string; name: string }; assignedTo?: Pick<User, 'id' | 'name' | 'email'> }
 export interface ServiceApproval { id: string; sequence: number; approvalType: string; status: string; approver?: Pick<User, 'id' | 'name' | 'email'>; decisionComment?: string; decidedAt?: string }
 export interface ServiceCatalogItem { id: string; name: string; description?: string; formSchema?: unknown[]; taskTemplates?: unknown[]; approvalRules?: ServiceApprovalRule[]; defaultAssignmentGroup?: { id: string; name: string } }
 export interface ServiceCatalogCategory { id: string; name: string; description?: string; items: ServiceCatalogItem[] }
@@ -30,6 +31,7 @@ export interface Incident {
   assignmentGroup?: { id: string; name: string };
   incident?: { impact?: string; urgency?: string; affectedService?: string; resolutionNotes?: string };
   serviceRequest?: { requestDetails?: Record<string, unknown>; catalogItem?: { id: string; name: string; category?: { id: string; name: string }; approvalRules?: ServiceApprovalRule[] }; approvals?: ServiceApproval[]; tasks?: RequestTask[] };
+  problem?: { rootCause?: string; workaround?: string; permanentFix?: string; knownError?: boolean; resolvedAt?: string; tasks?: ProblemTask[] };
   activities: { id: string; comment: string; createdAt: string; createdBy: Pick<User, 'id' | 'name'>; activityType?: { name: string } }[];
   slas: { id: string; definitionName: string; responseDueAt: string; resolutionDueAt: string; firstRespondedAt?: string; resolvedAt?: string; status: string }[];
 }
