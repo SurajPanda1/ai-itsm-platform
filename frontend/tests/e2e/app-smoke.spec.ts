@@ -9,20 +9,20 @@ test.beforeEach(async ({ page }) => {
   await page.getByLabel(/email/i).fill(email!);
   await page.getByLabel(/password/i).fill(password!);
   await page.getByRole("button", { name: /sign in|login/i }).click();
-  await expect(page.getByText(/open tickets|service catalogue|admin console/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /incidents/i })).toBeVisible();
 });
 
 test("homepage modules and analytics are reachable", async ({ page }) => {
-  await expect(page.getByRole("button", { name: /incidents/i })).toBeVisible();
-  await page.getByRole("button", { name: /requests/i }).click();
-  await expect(page.getByText(/service catalogue|browse catalogue|request/i).first()).toBeVisible();
-  await page.getByRole("button", { name: /analytics/i }).click();
-  await expect(page.getByText(/analytics console/i)).toBeVisible();
+  await expect(page.getByText("Incidents").first()).toBeVisible();
+  await page.getByText("Service requests").click();
+  await expect(page.getByRole("heading", { name: /service requests/i })).toBeVisible();
+  await page.getByText("Analytics Console").click();
+  await expect(page.getByRole("heading", { name: /analytics console/i })).toBeVisible();
 });
 
 test("admin service catalogue surfaces are reachable", async ({ page }) => {
-  await page.getByRole("button", { name: /admin console/i }).click();
-  await expect(page.getByText(/admin console/i)).toBeVisible();
+  await page.getByText("Admin Console").click();
+  await expect(page.getByRole("heading", { name: /admin console/i })).toBeVisible();
   await page.getByRole("button", { name: /service catalogue/i }).click();
   await expect(page.getByRole("button", { name: /catalogue list/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /approval rule list/i })).toBeVisible();
