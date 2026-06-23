@@ -21,6 +21,8 @@ model Organization {
   businessCalendars BusinessCalendar[]
   slaDefinitions    SlaDefinition[]
   attachments       TicketAttachment[]
+  serviceCatalogCategories ServiceCatalogCategory[]
+  serviceCatalogItems      ServiceCatalogItem[]
 
   @@map("organizations")
 }
@@ -59,6 +61,7 @@ model User {
   uploadedAttachments        TicketAttachment[]
   directRoles                UserRole[]              @relation("UserRoleUser")
   grantedRoles               UserRole[]              @relation("UserRoleGrantedBy")
+  requestedServiceRequests   ServiceRequest[]        @relation("ServiceRequestRequestedFor")
 
   @@map("users")
 }
@@ -138,6 +141,7 @@ model Ticket {
   priority          Priority?        @relation(fields: [priorityId], references: [id])
   assignmentGroup   AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
   incident          Incident?
+  serviceRequest    ServiceRequest?
   activities        TicketActivity[]
   slas              TicketSla[]
   attachments       TicketAttachment[]
@@ -181,6 +185,7 @@ model AssignmentGroup {
   members        AssignmentGroupMember[]
   tickets        Ticket[]
   roles          AssignmentGroupRole[]
+  serviceCatalogItems ServiceCatalogItem[]
 
   @@unique([organizationId, name])
   @@map("assignment_groups")
@@ -233,6 +238,61 @@ model Incident {
   ticket          Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@map("incidents")
+}
+
+model ServiceCatalogCategory {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String               @map("organization_id") @db.Uuid
+  name           String               @db.VarChar(100)
+  description    String?
+  active         Boolean              @default(true)
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @default(now()) @map("updated_at")
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items          ServiceCatalogItem[]
+
+  @@unique([organizationId, name])
+  @@map("service_catalog_categories")
+}
+
+model ServiceCatalogItem {
+  id                        String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId            String                  @map("organization_id") @db.Uuid
+  categoryId                String                  @map("category_id") @db.Uuid
+  name                      String                  @db.VarChar(120)
+  description               String?
+  defaultAssignmentGroupId  String?                 @map("default_assignment_group_id") @db.Uuid
+  formSchema                Json                    @default("[]") @map("form_schema")
+  active                    Boolean                 @default(true)
+  createdAt                 DateTime                @default(now()) @map("created_at")
+  updatedAt                 DateTime                @default(now()) @map("updated_at")
+  organization              Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category                  ServiceCatalogCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  defaultAssignmentGroup    AssignmentGroup?        @relation(fields: [defaultAssignmentGroupId], references: [id])
+  serviceRequests           ServiceRequest[]
+
+  @@unique([organizationId, name])
+  @@index([categoryId])
+  @@index([defaultAssignmentGroupId])
+  @@map("service_catalog_items")
+}
+
+model ServiceRequest {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId         String              @unique @map("ticket_id") @db.Uuid
+  requestedForId   String              @map("requested_for") @db.Uuid
+  catalogItemId    String              @map("catalog_item_id") @db.Uuid
+  requestDetails   Json                @default("{}") @map("request_details")
+  fulfillmentNotes String?             @map("fulfillment_notes")
+  fulfilledAt      DateTime?           @map("fulfilled_at")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  ticket           Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requestedFor     User                @relation("ServiceRequestRequestedFor", fields: [requestedForId], references: [id])
+  catalogItem      ServiceCatalogItem  @relation(fields: [catalogItemId], references: [id])
+
+  @@index([catalogItemId])
+  @@index([requestedForId])
+  @@map("service_requests")
 }
 
 model ActivityType {

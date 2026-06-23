@@ -1,4 +1,4 @@
-import type { AnalyticsReport, AssignmentGroup, Attachment, Branding, Incident, OrganizationSettings, PaginatedGroups, PaginatedUsers, ReferenceData, RelatedItem, Session, SlaDefinition } from './types';
+import type { AnalyticsReport, AssignmentGroup, Attachment, Branding, Incident, OrganizationSettings, PaginatedGroups, PaginatedUsers, ReferenceData, RelatedItem, ServiceCatalogCategory, Session, SlaDefinition } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
 
@@ -43,6 +43,15 @@ export const api = {
   login: (email: string, password: string) => request<Session>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   incidents: (token: string) => request<Incident[]>('/incidents', {}, token),
   createIncident: (token: string, input: object) => request<Incident>('/incidents', { method: 'POST', body: JSON.stringify(input) }, token),
+  serviceCatalog: (token: string) => request<ServiceCatalogCategory[]>('/service-requests/catalog', {}, token),
+  createServiceCategory: (token: string, input: object) => request('/service-requests/catalog/categories', { method: 'POST', body: JSON.stringify(input) }, token),
+  createServiceCatalogItem: (token: string, input: object) => request('/service-requests/catalog/items', { method: 'POST', body: JSON.stringify(input) }, token),
+  updateServiceCatalogItem: (token: string, id: string, input: object) => request(`/service-requests/catalog/items/${id}`, { method: 'PATCH', body: JSON.stringify(input) }, token),
+  serviceRequests: (token: string) => request<Incident[]>('/service-requests', {}, token),
+  createServiceRequest: (token: string, input: object) => request<Incident>('/service-requests', { method: 'POST', body: JSON.stringify(input) }, token),
+  changeServiceRequestStatus: (token: string, id: string, status: string) => request<Incident>(`/service-requests/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }, token),
+  assignServiceRequest: (token: string, id: string, input: object) => request<Incident>(`/service-requests/${id}/assignment`, { method: 'PATCH', body: JSON.stringify(input) }, token),
+  addServiceRequestActivity: (token: string, id: string, comment: string, type: 'COMMENT' | 'WORK_NOTE') => request(`/service-requests/${id}/comments`, { method: 'POST', body: JSON.stringify({ comment, type }) }, token),
   updateIncident: (token: string, id: string, input: object) => request<Incident>(`/incidents/${id}`, { method: 'PATCH', body: JSON.stringify(input) }, token),
   assignmentGroups: (token: string) => request<AssignmentGroup[]>('/assignment-groups', {}, token),
   assignIncident: (token: string, id: string, input: object) => request<Incident>(`/incidents/${id}/assignment`, { method: 'PATCH', body: JSON.stringify(input) }, token),

@@ -4,6 +4,8 @@ export interface Attachment { id: string; fileName: string; contentType: string;
 export interface AnalyticsReport { scope:'ORGANIZATION'|'MY_GROUPS';period:{from:string;to:string};kpis:{total:number;open:number;resolved:number;critical:number;averageResponseMinutes:number|null;averageResolutionMinutes:number|null;slaMet:number;slaAtRisk:number;slaBreached:number};byStatus:{name:string;value:number}[];byPriority:{name:string;value:number}[];byGroup:{name:string;value:number}[];byAssignee:{name:string;value:number}[];trend:{date:string;created:number;resolved:number}[];aging:{name:string;value:number}[];filters:{groups:{id:string;name:string}[];priorities:{id:string;name:string}[];assignees:{id:string;name:string}[]}}
 export interface Session { accessToken: string; user: User }
 export interface AssignmentGroup { id: string; name: string; description?: string; members: { user: Pick<User, 'id' | 'name' | 'email'> }[] }
+export interface ServiceCatalogItem { id: string; name: string; description?: string; formSchema?: unknown[]; defaultAssignmentGroup?: { id: string; name: string } }
+export interface ServiceCatalogCategory { id: string; name: string; description?: string; items: ServiceCatalogItem[] }
 export interface RelatedItem { id: string; relationshipType: string; direction: 'INBOUND' | 'OUTBOUND'; ticketId: string; ticketNumber: string; title: string; status?: string; ticketType?: string; createdAt: string }
 export interface AdminUser { id: string; name: string; email: string; active: boolean; departmentId?: string; directRoles: { role: { id: string; name: string } }[]; assignmentGroupMemberships: { assignmentGroup: { id: string; name: string; roles: { role: { id: string; name: string } }[] } }[] }
 export interface AdminGroup { id: string; name: string; description?: string; active: boolean; manager?: { id: string; name: string }; roles: { role: { id: string; name: string } }[]; members: { user: Pick<AdminUser, 'id' | 'name' | 'email' | 'active'> }[] }
@@ -24,6 +26,7 @@ export interface Incident {
   assignedTo?: Pick<User, 'id' | 'name' | 'email'>;
   assignmentGroup?: { id: string; name: string };
   incident?: { impact?: string; urgency?: string; affectedService?: string; resolutionNotes?: string };
+  serviceRequest?: { requestDetails?: Record<string, unknown>; catalogItem?: { id: string; name: string; category?: { id: string; name: string } } };
   activities: { id: string; comment: string; createdAt: string; createdBy: Pick<User, 'id' | 'name'>; activityType?: { name: string } }[];
   slas: { id: string; definitionName: string; responseDueAt: string; resolutionDueAt: string; firstRespondedAt?: string; resolvedAt?: string; status: string }[];
 }

@@ -5,6 +5,7 @@ import type {
   AdminUser,
   OrganizationSettings,
   ReferenceData,
+  ServiceCatalogCategory,
   SlaDefinition,
 } from "./types";
 import { rawTimeZones } from "@vvo/tzdb";
@@ -167,12 +168,13 @@ export default function AdminConsole({
   token: string;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"users" | "groups" | "slas" | "settings">(
+  const [tab, setTab] = useState<"users" | "groups" | "catalog" | "slas" | "settings">(
     "users",
   );
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [slas, setSlas] = useState<SlaDefinition[]>([]);
+  const [catalog, setCatalog] = useState<ServiceCatalogCategory[]>([]);
   const [settings, setSettings] = useState(defaultSettings);
   const [reference, setReference] = useState(emptyReference);
   const [page, setPage] = useState(1);
@@ -195,6 +197,14 @@ export default function AdminConsole({
     temporaryPassword: "",
   });
   const [newGroup, setNewGroup] = useState({ name: "", description: "" });
+  const [newCategory, setNewCategory] = useState({ name: "", description: "" });
+  const [newCatalogItem, setNewCatalogItem] = useState({
+    categoryId: "",
+    name: "",
+    description: "",
+    defaultAssignmentGroupId: "",
+    formSchema: '[{"key":"details","label":"Request details","type":"textarea","required":true}]',
+  });
   const [newSla, setNewSla] = useState({
     name: "",
     ticketTypeId: "",
@@ -208,12 +218,13 @@ export default function AdminConsole({
   const [calendarTimezone, setCalendarTimezone] = useState("Asia/Kolkata");
   async function load() {
     try {
-      const [u, g, r, s, o] = await Promise.all([
+      const [u, g, r, s, o, c] = await Promise.all([
         api.adminUsers(token, page, search),
         api.adminGroups(token, groupPage, groupSearch, groupActive),
         api.adminReferenceData(token),
         api.adminSlas(token),
         api.organizationSettings(token),
+        api.serviceCatalog(token),
       ]);
       setUsers(u.data);
       setTotal(u.total);
@@ -223,6 +234,7 @@ export default function AdminConsole({
       setGroupTotalPages(g.totalPages);
       setReference(r);
       setSlas(s);
+      setCatalog(c);
       setSettings({
         organizationName: o.organizationName,
         branding: { ...defaultSettings.branding, ...o.branding },
@@ -235,6 +247,10 @@ export default function AdminConsole({
           value.ticketTypeId ||
           r.ticketTypes.find((type) => type.name === "INCIDENT")?.id ||
           "",
+      }));
+      setNewCatalogItem((value) => ({
+        ...value,
+        categoryId: value.categoryId || c[0]?.id || "",
       }));
     } catch (reason) {
       setError(
@@ -280,6 +296,47 @@ export default function AdminConsole({
       await api.createAdminGroup(token, newGroup);
       setNewGroup({ name: "", description: "" });
       await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createCategory(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api.createServiceCategory(token, newCategory);
+      setNewCategory({ name: "", description: "" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create category");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createCatalogItem(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      let formSchema: unknown[] = [];
+      try {
+        const parsed = JSON.parse(newCatalogItem.formSchema || "[]");
+        formSchema = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        throw new Error("Form schema must be valid JSON array.");
+      }
+      await api.createServiceCatalogItem(token, {
+        categoryId: newCatalogItem.categoryId,
+        name: newCatalogItem.name,
+        description: newCatalogItem.description,
+        defaultAssignmentGroupId: newCatalogItem.defaultAssignmentGroupId || undefined,
+        formSchema,
+      });
+      setNewCatalogItem((value) => ({ ...value, name: "", description: "" }));
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create catalogue item");
     } finally {
       setBusy(false);
     }
@@ -399,6 +456,12 @@ export default function AdminConsole({
             onClick={() => setTab("groups")}
           >
             Assignment Groups
+          </button>
+          <button
+            className={tab === "catalog" ? "active" : ""}
+            onClick={() => setTab("catalog")}
+          >
+            Service Catalogue
           </button>
           <button
             className={tab === "slas" ? "active" : ""}
@@ -699,11 +762,99 @@ export default function AdminConsole({
             </div>
           </div>
         )}
+        {tab === "catalog" && (
+          <div className="admin-grid">
+            <div className="admin-form-stack">
+              <form className="admin-form" onSubmit={createCategory}>
+                <h2>Add request category</h2>
+                <p className="muted">
+                  Categories group catalogue items shown to employees.
+                </p>
+                <label>
+                  Category name
+                  <input required value={newCategory.name} onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} />
+                </label>
+                <label>
+                  Description
+                  <textarea rows={3} value={newCategory.description} onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })} />
+                </label>
+                <button className="primary" disabled={busy}>Create category</button>
+              </form>
+              <form className="admin-form" onSubmit={createCatalogItem}>
+                <h2>Add catalogue item</h2>
+                <p className="muted">
+                  Set the default routing group. SLA targets are configured separately in the SLA Policies tab by choosing ticket type SERVICE_REQUEST.
+                </p>
+                <label>
+                  Category
+                  <select required value={newCatalogItem.categoryId} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, categoryId: e.target.value })}>
+                    <option value="">Select category</option>
+                    {catalog.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Item name
+                  <input required value={newCatalogItem.name} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, name: e.target.value })} />
+                </label>
+                <label>
+                  Description
+                  <textarea rows={3} value={newCatalogItem.description} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, description: e.target.value })} />
+                </label>
+                <label>
+                  Default assignment group
+                  <select value={newCatalogItem.defaultAssignmentGroupId} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, defaultAssignmentGroupId: e.target.value })}>
+                    <option value="">No default group</option>
+                    {groups.filter((group) => group.active).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Form schema
+                  <textarea rows={4} value={newCatalogItem.formSchema} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, formSchema: e.target.value })} />
+                  <small className="muted">Stored now for future dynamic forms. Current request form uses the default request details field.</small>
+                </label>
+                <button className="primary" disabled={busy || catalog.length === 0}>Create catalogue item</button>
+              </form>
+            </div>
+            <div className="admin-list">
+              <h2>Service Catalogue <span>{catalog.reduce((total, category) => total + category.items.length, 0)}</span></h2>
+              {catalog.length === 0 && <p className="muted">No request categories yet.</p>}
+              {catalog.map((category) => (
+                <article className="group-card catalog-card" key={category.id}>
+                  <b>{category.name}</b>
+                  <small>{category.description || "No description"}</small>
+                  <div className="catalog-items">
+                    {category.items.length === 0 ? <p className="muted">No active catalogue items in this category.</p> : category.items.map((item) => (
+                      <div className="catalog-item-row" key={item.id}>
+                        <div>
+                          <b>{item.name}</b>
+                          <small>{item.description || "No description"}</small>
+                          <small>Routes to {item.defaultAssignmentGroup?.name || "No default group"}</small>
+                        </div>
+                        <button
+                          className="secondary small"
+                          onClick={async () => {
+                            await api.updateServiceCatalogItem(token, item.id, { active: false });
+                            await load();
+                          }}
+                        >
+                          Deactivate
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
         {tab === "slas" && (
           <div className="admin-grid">
             <div className="admin-form-stack">
               <form className="admin-form" onSubmit={createSla}>
                 <h2>Add SLA policy</h2>
+                <p className="muted">
+                  For Service Requests, choose ticket type SERVICE_REQUEST. New requests snapshot the matching SLA when submitted.
+                </p>
                 <label>
                   Name
                   <input

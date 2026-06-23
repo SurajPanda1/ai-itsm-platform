@@ -16,6 +16,7 @@ Completed in the current MVP:
 - One-hour inactivity timeout and twelve-hour maximum session
 - Organization-level data isolation
 - Incident creation, listing, details, editing, assignment, status, resolution, comments, and work notes
+- Service Catalogue foundation with categories, catalogue items, default routing groups, and employee service request submission/listing
 - Sequential incident numbers such as `INC000002`
 - Assignment groups and group membership
 - Related child incidents, changes, and problems
@@ -30,7 +31,7 @@ Completed in the current MVP:
 - Analytics Console with incident KPIs, trends, SLA outcomes, aging, workload reporting, filters, scoped access, and CSV export
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
-The service request, problem, change, CMDB, knowledge, reporting, and AI interfaces are not yet implemented in the application layer. Their original database tables are present.
+Problem, change, CMDB, knowledge, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests now have a first foundation slice; advanced request fulfilment, approvals, and configurable form rendering are still upcoming.
 
 ## Architecture
 
@@ -106,6 +107,7 @@ npx.cmd prisma db execute --file prisma/manual/008_sla_lifecycle.sql --schema pr
 npx.cmd prisma db execute --file prisma/manual/009_organization_settings.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/010_ticket_attachments.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/011_nextris_dark_theme.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/012_service_catalog_requests.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -164,6 +166,17 @@ Incidents:
 - `PATCH /api/incidents/:id/status`
 - `PATCH /api/incidents/:id/resolve`
 - `POST /api/incidents/:id/comments`
+
+Service Requests:
+
+- `GET /api/service-requests/catalog`
+- `POST /api/service-requests/catalog/categories`
+- `POST /api/service-requests/catalog/items`
+- `PATCH /api/service-requests/catalog/items/:id`
+- `POST /api/service-requests`
+- `GET /api/service-requests`
+- `GET /api/service-requests/:id`
+- `PATCH /api/service-requests/:id/status`
 
 Supporting endpoints:
 

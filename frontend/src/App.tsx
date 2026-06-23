@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import AdminConsoleV2 from "./AdminConsole";
 import AnalyticsConsole from "./AnalyticsConsole";
@@ -11,6 +11,7 @@ import type {
   Incident,
   ReferenceData,
   RelatedItem,
+  ServiceCatalogCategory,
   Session,
   SlaDefinition,
 } from "./types";
@@ -18,6 +19,7 @@ import type {
 const sessionKey = "ai-itsm-session";
 const activityKey = "ai-itsm-last-activity";
 const themePreferenceKey = "ai-itsm-theme-preference";
+const modulePreferenceKey = "ai-itsm-active-module";
 const defaultBranding: Branding = { organizationName: "Nextris", portalTitle: "Nextris Sevā", welcomeMessage: "How can we help?", primaryColor: "#16a394", accentColor: "#6ee7b7", showPoweredBy: true, themeMode: "DARK" };
 type ThemePreference = "DARK" | "LIGHT" | "SYSTEM";
 
@@ -220,6 +222,88 @@ function CreateIncident({
           <button className="primary" disabled={busy}>
             {busy ? "Creating…" : "Create incident"}
           </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CreateServiceRequest({
+  token,
+  catalog,
+  onCreated,
+  onClose,
+}: {
+  token: string;
+  catalog: ServiceCatalogCategory[];
+  onCreated: (i: Incident) => void;
+  onClose: () => void;
+}) {
+  const items = catalog.flatMap((category) => category.items.map((item) => ({ ...item, categoryName: category.name })));
+  const [catalogItemId, setCatalogItemId] = useState(items[0]?.id || "");
+  const selectedItem = items.find((item) => item.id === catalogItemId);
+  const [form, setForm] = useState({ title: "", description: "", details: "" });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!catalogItemId) {
+      setError("Select a catalogue item first.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      onCreated(await api.createServiceRequest(token, {
+        catalogItemId,
+        title: form.title,
+        description: form.description,
+        requestDetails: { details: form.details },
+      }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create service request");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="modal" onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">SERVICE CATALOGUE</p>
+            <h2>Create service request</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose}>×</button>
+        </div>
+        <label>
+          Catalogue item
+          <select value={catalogItemId} onChange={(e) => setCatalogItemId(e.target.value)} required>
+            {items.length === 0 ? <option value="">No active catalogue items</option> : items.map((item) => (
+              <option key={item.id} value={item.id}>{item.categoryName} — {item.name}</option>
+            ))}
+          </select>
+          {selectedItem?.description && <small className="muted">{selectedItem.description}</small>}
+        </label>
+        <label>
+          Title
+          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} minLength={3} maxLength={200} placeholder="What do you need?" required autoFocus />
+        </label>
+        <label>
+          Description
+          <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} placeholder="Short summary of the request" />
+        </label>
+        <label>
+          Request details
+          <textarea value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} rows={4} placeholder="Add access name, software, device details, business reason, etc." />
+        </label>
+        {selectedItem?.defaultAssignmentGroup && <p className="muted">Routes to {selectedItem.defaultAssignmentGroup.name}</p>}
+        {error && <div className="error">{error}</div>}
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={busy || items.length === 0}>{busy ? "Creating…" : "Create request"}</button>
         </div>
       </form>
     </div>
@@ -763,6 +847,216 @@ function IncidentDetail({
   );
 }
 
+function ServiceRequestDetail({
+  request,
+  token,
+  canEdit,
+  canReopen,
+  groups,
+  onUpdated,
+  onClose,
+}: {
+  request: Incident;
+  token: string;
+  canEdit: boolean;
+  canReopen: boolean;
+  groups: AssignmentGroup[];
+  onUpdated: (value: Incident) => void;
+  onClose: () => void;
+}) {
+  const [status, setStatus] = useState(request.status?.name || "OPEN");
+  const [groupId, setGroupId] = useState(request.assignmentGroup?.id || groups[0]?.id || "");
+  const [assigneeId, setAssigneeId] = useState(request.assignedTo?.id || "");
+  const [note, setNote] = useState("");
+  const [activeTab, setActiveTab] = useState<"work-notes" | "attachments">("work-notes");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const details = request.serviceRequest?.requestDetails || {};
+  const selectedGroup = groups.find((group) => group.id === groupId);
+
+  async function updateStatus() {
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated(await api.changeServiceRequestStatus(token, request.id, status));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Status update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function assign() {
+    if (!groupId || !assigneeId) return;
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated(await api.assignServiceRequest(token, request.id, { assignmentGroupId: groupId, assignedToId: assigneeId }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Assignment failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addNote() {
+    if (!note.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.addServiceRequestActivity(token, request.id, note, canEdit ? "WORK_NOTE" : "COMMENT");
+      const refreshed = await api.serviceRequests(token);
+      const value = refreshed.find((item) => item.id === request.id);
+      if (value) onUpdated(value);
+      setNote("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not add activity");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadAttachments() { try { setAttachments(await api.attachments(token, request.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load attachments"); } }
+  async function uploadAttachment(file?: File) { if(!file)return;setBusy(true);setError("");try{await api.uploadAttachment(token,request.id,file);await loadAttachments();}catch(reason){setError(reason instanceof Error?reason.message:"Could not upload attachment")}finally{setBusy(false)} }
+  async function deleteAttachment(id:string) { setBusy(true);try{await api.deleteAttachment(token,request.id,id);await loadAttachments();}catch(reason){setError(reason instanceof Error?reason.message:"Could not delete attachment")}finally{setBusy(false)} }
+  useEffect(() => { api.attachmentConfiguration(token).then(value=>{setAttachmentConfig(value);if(value.enabled)void loadAttachments()}).catch(()=>setAttachmentConfig(null)); }, [token,request.id]);
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <section className="modal detail-modal">
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">{request.ticketNumber}</p>
+            <h2>{request.title}</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose}>×</button>
+        </div>
+        <div className="detail-meta">
+          <div>
+            <small>Status</small>
+            <span className={`badge ${request.status?.name.toLowerCase()}`}>{request.status?.name.replace("_", " ")}</span>
+          </div>
+          <div>
+            <small>Catalogue item</small>
+            <b>{request.serviceRequest?.catalogItem?.name || "Service request"}</b>
+          </div>
+          <div>
+            <small>Assignment group</small>
+            <b>{request.assignmentGroup?.name || "Unassigned"}</b>
+          </div>
+          <div>
+            <small>Requested by</small>
+            <b>{request.createdBy.name}</b>
+          </div>
+        </div>
+        <div className="operations-grid">
+          <div>
+            <div className="detail-section">
+              <h3>Description</h3>
+              <p>{request.description || "No description provided."}</p>
+            </div>
+            <div className="detail-section">
+              <h3>Request details</h3>
+              {Object.keys(details).length === 0 ? <p className="muted">No extra details submitted.</p> : (
+                <dl>
+                  {Object.entries(details).map(([key, value]) => (
+                    <Fragment key={key}>
+                      <dt>{key}</dt>
+                      <dd>{String(value || "—")}</dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              )}
+              <dl>
+                <dt>Created</dt>
+                <dd>{new Date(request.createdAt).toLocaleString()}</dd>
+              </dl>
+            </div>
+          </div>
+          <div>
+            {canEdit && (
+              <div className="detail-section">
+                <h3>Assignment</h3>
+                <div className="assignment-row stacked">
+                  <select value={groupId} onChange={(e) => { setGroupId(e.target.value); setAssigneeId(""); }}>
+                    <option value="">Select group</option>
+                    {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                  </select>
+                  <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+                    <option value="">Select assignee</option>
+                    {selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}
+                  </select>
+                  <button className="secondary" onClick={assign} disabled={!groupId || !assigneeId || busy}>Assign</button>
+                </div>
+              </div>
+            )}
+            {canEdit && (
+              <div className="detail-section">
+                <h3>Status</h3>
+                <div className="status-row">
+                  <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={request.status?.name === "CLOSED" && !canReopen}>
+                    {["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"].map((value) => (
+                      <option key={value} value={value}>{value.replaceAll("_", " ")}</option>
+                    ))}
+                  </select>
+                  <button className="secondary" onClick={updateStatus} disabled={busy || (request.status?.name === "CLOSED" && !canReopen)}>Update</button>
+                </div>
+                {request.status?.name === "CLOSED" && !canReopen && <p className="muted">Only an administrator can reopen a closed ticket.</p>}
+              </div>
+            )}
+            {request.slas?.length > 0 && (
+              <div className="detail-section">
+                <h3>SLA</h3>
+                {request.slas.map((sla) => (
+                  <div className="ticket-sla" key={sla.id}>
+                    <div>
+                      <b>{sla.definitionName}</b>
+                      <span className={`badge ${sla.status.toLowerCase()}`}>{sla.status.replace("_", " ")}</span>
+                    </div>
+                    <small>Response due {new Date(sla.responseDueAt).toLocaleString()}</small>
+                    <small>Resolution due {new Date(sla.resolutionDueAt).toLocaleString()}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="detail-section">
+          <div className="record-tabs">
+            <button className={activeTab === "work-notes" ? "active" : ""} onClick={() => setActiveTab("work-notes")}>{canEdit ? "Work Notes" : "Comments"}</button>
+            {attachmentConfig?.enabled && <button className={activeTab === "attachments" ? "active" : ""} onClick={() => setActiveTab("attachments")}>Attachments <span>{attachments.length}</span></button>}
+          </div>
+          {activeTab === "work-notes" ? (
+            <>
+              <div className="note-entry">
+                <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note…" : "Add a comment…"} />
+                <button className="primary" onClick={addNote} disabled={!note.trim() || busy}>Add {canEdit ? "work note" : "comment"}</button>
+              </div>
+              <div className="activity-list">
+                {request.activities.length === 0 ? <p className="muted">No activity yet.</p> : request.activities.map((activity) => (
+                  <article key={activity.id}>
+                    <div>
+                      <b>{activity.createdBy.name}</b>
+                      <span className="activity-type">{activity.activityType?.name.replace("_", " ") || "ACTIVITY"}</span>
+                      <time>{new Date(activity.createdAt).toLocaleString()}</time>
+                    </div>
+                    <p>{activity.comment}</p>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="attachment-panel"><label className="attachment-upload">Add attachment <small>Maximum {attachmentConfig?.maxFileSizeMb||10} MB</small><input type="file" disabled={busy} onChange={e=>{void uploadAttachment(e.target.files?.[0]);e.target.value=''}}/></label>{attachments.length===0?<p className="muted">No attachments yet.</p>:<div className="attachment-list">{attachments.map(item=><article key={item.id}><div><b>{item.fileName}</b><small>{(item.sizeBytes/1024).toFixed(1)} KB · {item.uploadedBy.name} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="secondary small" onClick={()=>api.downloadAttachment(token,request.id,item.id,item.fileName)}>Download</button><button className="icon-button danger" title="Delete attachment" onClick={()=>deleteAttachment(item.id)}>×</button></article>)}</div>}</div>
+          )}
+        </div>
+        {error && <div className="error">{error}</div>}
+      </section>
+    </div>
+  );
+}
+
 function AdminConsole({
   token,
   onClose,
@@ -1204,10 +1498,15 @@ function AdminConsole({
 
 function Dashboard({ session, onLogout, branding, themePreference, onThemePreferenceChange }: { session: Session; onLogout: () => void; branding: Branding; themePreference: ThemePreference; onThemePreferenceChange: (value: ThemePreference) => void }) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [serviceRequests, setServiceRequests] = useState<Incident[]>([]);
+  const [catalog, setCatalog] = useState<ServiceCatalogCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [creatingRequest, setCreatingRequest] = useState(false);
   const [selected, setSelected] = useState<Incident | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<Incident | null>(null);
+  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS">(() => localStorage.getItem(modulePreferenceKey) === "REQUESTS" ? "REQUESTS" : "INCIDENTS");
   const canOperate = session.user.roles.some((role) =>
     ["IT_AGENT", "IT_SERVICE_MANAGER", "ADMIN"].includes(role),
   );
@@ -1220,12 +1519,23 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
   const [analyticsOpen,setAnalyticsOpen]=useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   useEffect(() => {
-    api
-      .incidents(session.accessToken)
-      .then(setIncidents)
+    setLoading(true);
+    Promise.all([
+      api.incidents(session.accessToken),
+      api.serviceRequests(session.accessToken),
+      api.serviceCatalog(session.accessToken),
+    ])
+      .then(([incidentValues, requestValues, catalogValues]) => {
+        setIncidents(incidentValues);
+        setServiceRequests(requestValues);
+        setCatalog(catalogValues);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [session.accessToken]);
+  useEffect(() => {
+    localStorage.setItem(modulePreferenceKey, activeModule);
+  }, [activeModule]);
   useEffect(() => {
     if (!isEmployee)
       api
@@ -1240,6 +1550,15 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
       critical: incidents.filter((i) => i.priority?.name === "CRITICAL").length,
     }),
     [incidents],
+  );
+  const requestStats = useMemo(
+    () => ({
+      open: serviceRequests.filter((i) => !["RESOLVED", "CLOSED"].includes(i.status?.name || "")).length,
+      inProgress: serviceRequests.filter((i) => i.status?.name === "IN_PROGRESS").length,
+      total: serviceRequests.length,
+      catalogItems: catalog.reduce((total, category) => total + category.items.length, 0),
+    }),
+    [catalog, serviceRequests],
   );
   const visibleIncidents = useMemo(
     () =>
@@ -1256,15 +1575,30 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
       }),
     [incidents, search, statusFilter],
   );
+  const visibleServiceRequests = useMemo(
+    () =>
+      serviceRequests.filter((request) => {
+        const term = search.toLowerCase();
+        const matchesText =
+          !term ||
+          request.ticketNumber.toLowerCase().includes(term) ||
+          request.title.toLowerCase().includes(term) ||
+          request.serviceRequest?.catalogItem?.name.toLowerCase().includes(term);
+        const matchesStatus =
+          statusFilter === "ALL" || request.status?.name === statusFilter;
+        return matchesText && matchesStatus;
+      }),
+    [serviceRequests, search, statusFilter],
+  );
   return (
     <div className="app-shell">
       <aside>
         <Brand branding={branding} />
         <nav>
-          <a className="active">
+          <a className={activeModule === "INCIDENTS" ? "active" : ""} onClick={() => setActiveModule("INCIDENTS")}>
             ▦ <span>Incidents</span>
           </a>
-          <a>
+          <a className={activeModule === "REQUESTS" ? "active" : ""} onClick={() => setActiveModule("REQUESTS")}>
             ⌁ <span>Service requests</span>
           </a>
           <a>
@@ -1324,44 +1658,46 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
             <p className="eyebrow">
               {isEmployee ? "EMPLOYEE SUPPORT" : "SERVICE OPERATIONS"}
             </p>
-            <h1>{isEmployee ? "My incidents" : "Incidents"}</h1>
+            <h1>{activeModule === "REQUESTS" ? (isEmployee ? "My service requests" : "Service requests") : (isEmployee ? "My incidents" : "Incidents")}</h1>
             <p>
-              {isEmployee
+              {activeModule === "REQUESTS"
+                ? "Browse catalogue requests and track fulfilment."
+                : isEmployee
                 ? "Report issues and follow their progress."
                 : "Track interruptions and restore service quickly."}
             </p>
           </div>
-          <button className="primary compact" onClick={() => setCreating(true)}>
-            ＋ New incident
+          <button className="primary compact" onClick={() => activeModule === "REQUESTS" ? setCreatingRequest(true) : setCreating(true)}>
+            {activeModule === "REQUESTS" ? "＋ New request" : "＋ New incident"}
           </button>
         </header>
         <section className="stats">
           <article>
             <span>Open</span>
-            <strong>{stats.open}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.open : stats.open}</strong>
             <small>Awaiting action</small>
           </article>
           <article>
             <span>In progress</span>
-            <strong>{stats.active}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.inProgress : stats.active}</strong>
             <small>Work underway</small>
           </article>
           <article>
-            <span>Critical</span>
-            <strong>{stats.critical}</strong>
-            <small>Highest priority</small>
+            <span>{activeModule === "REQUESTS" ? "Catalogue items" : "Critical"}</span>
+            <strong>{activeModule === "REQUESTS" ? requestStats.catalogItems : stats.critical}</strong>
+            <small>{activeModule === "REQUESTS" ? "Available request types" : "Highest priority"}</small>
           </article>
           <article>
             <span>Total</span>
-            <strong>{incidents.length}</strong>
-            <small>All incidents</small>
+            <strong>{activeModule === "REQUESTS" ? requestStats.total : incidents.length}</strong>
+            <small>{activeModule === "REQUESTS" ? "All requests" : "All incidents"}</small>
           </article>
         </section>
         <section className="table-card">
           <div className="table-head">
             <div>
-              <h2>Incident queue</h2>
-              <p>All incidents in your organization</p>
+              <h2>{activeModule === "REQUESTS" ? "Request queue" : "Incident queue"}</h2>
+              <p>{activeModule === "REQUESTS" ? "Service requests for your scope" : "All incidents in your organization"}</p>
             </div>
             <div className="queue-filters">
               <select
@@ -1383,17 +1719,17 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                 className="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search incidents"
+                placeholder={activeModule === "REQUESTS" ? "Search requests" : "Search incidents"}
               />
             </div>
           </div>
           {loading ? (
-            <div className="empty">Loading incidents…</div>
+            <div className="empty">{activeModule === "REQUESTS" ? "Loading requests…" : "Loading incidents…"}</div>
           ) : error ? (
             <div className="error table-error">{error}</div>
-          ) : visibleIncidents.length === 0 ? (
+          ) : (activeModule === "REQUESTS" ? visibleServiceRequests.length : visibleIncidents.length) === 0 ? (
             <div className="empty">
-              <b>No matching incidents</b>
+              <b>{activeModule === "REQUESTS" ? "No matching requests" : "No matching incidents"}</b>
               <span>Try changing your search or filter.</span>
             </div>
           ) : (
@@ -1402,7 +1738,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                 <thead>
                   <tr>
                     <th>Number</th>
-                    <th>Incident</th>
+                    <th>{activeModule === "REQUESTS" ? "Request" : "Incident"}</th>
                     <th>Status</th>
                     <th>Priority</th>
                     <th>Assignee</th>
@@ -1410,12 +1746,12 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleIncidents.map((i) => (
+                  {(activeModule === "REQUESTS" ? visibleServiceRequests : visibleIncidents).map((i) => (
                     <tr key={i.id}>
                       <td>
                         <button
                           className="ticket-link"
-                          onClick={() => setSelected(i)}
+                          onClick={() => activeModule === "REQUESTS" ? setSelectedRequest(i) : setSelected(i)}
                         >
                           {i.ticketNumber}
                         </button>
@@ -1423,7 +1759,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                       <td>
                         <strong>{i.title}</strong>
                         <small>
-                          {i.incident?.affectedService || "General service"}
+                          {activeModule === "REQUESTS" ? i.serviceRequest?.catalogItem?.name || "Service request" : i.incident?.affectedService || "General service"}
                         </small>
                       </td>
                       <td>
@@ -1464,6 +1800,18 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           }}
         />
       )}
+      {creatingRequest && (
+        <CreateServiceRequest
+          token={session.accessToken}
+          catalog={catalog}
+          onClose={() => setCreatingRequest(false)}
+          onCreated={(request) => {
+            setServiceRequests((x) => [request, ...x]);
+            setCreatingRequest(false);
+            setActiveModule("REQUESTS");
+          }}
+        />
+      )}
       {selected && (
         <IncidentDetail
           incident={selected}
@@ -1475,6 +1823,22 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           onUpdated={(updated) => {
             setSelected(updated);
             setIncidents((items) =>
+              items.map((item) => (item.id === updated.id ? updated : item)),
+            );
+          }}
+        />
+      )}
+      {selectedRequest && (
+        <ServiceRequestDetail
+          request={selectedRequest}
+          token={session.accessToken}
+          canEdit={canOperate}
+          canReopen={isAdmin}
+          groups={groups}
+          onClose={() => setSelectedRequest(null)}
+          onUpdated={(updated) => {
+            setSelectedRequest(updated);
+            setServiceRequests((items) =>
               items.map((item) => (item.id === updated.id ? updated : item)),
             );
           }}

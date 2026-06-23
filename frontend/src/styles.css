@@ -26,3 +26,4 @@ html[data-theme="dark"] .admin-overlay,html[data-theme="dark"] .modal-backdrop {
 .user-menu select { padding: 9px 10px; }
 html[data-theme="dark"] .user-menu { background: #111820; border-color: #28323d; box-shadow: 0 18px 40px #0009; }
 html[data-theme="dark"] .user-menu label { color: #dce5ee; }
+nav a { cursor: pointer; user-select: none; }

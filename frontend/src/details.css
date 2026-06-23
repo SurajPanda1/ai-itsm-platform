@@ -1,4 +1,4 @@
-.ticket-link { border: 0; background: none; padding: 0; color: #087443; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.ticket-link { border: 0; background: none; padding: 0; color: #087443; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .ticket-link:hover { color: #065f46; }
 .detail-modal { width: min(760px, 100%); }
 .detail-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
@@ -23,6 +23,7 @@ html[data-theme="dark"] .detail-meta b { color: #f3f7fb; }
 .activity-list article time { margin-left: auto; color: #98a2b3; }
 .activity-list article p { margin: 9px 0 0; }
 .activity-type { background: #f2f4f7; border-radius: 999px; padding: 3px 7px; font-size: 10px; }
+html[data-theme="dark"] .activity-type { background: #26313c; color: #dce5ee; }
 .note-entry { display: grid; gap: 10px; }
 .note-entry button { justify-self: end; }
 @media (max-width: 600px) { .assignment-row { grid-template-columns: 1fr; } }
@@ -98,6 +99,9 @@ html[data-theme="dark"] .analytics-kpis article,html[data-theme="dark"] .analyti
 .ticket-sla div { display: flex; justify-content: space-between; gap: 8px; }
 .ticket-sla small { display: block; color: #667085; margin-top: 6px; }
 .sla-countdown { display: block; color: #087443; margin-top: 8px; font-size: 13px; }
+.catalog-items { display: grid; gap: 10px; margin-top: 14px; }
+.catalog-item-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; border: 1px solid #eaecf0; border-radius: 8px; padding: 12px; }
+html[data-theme="dark"] .catalog-item-row { border-color: #28323d; background: #0d141b; }
 .admin-form-stack { display: grid; gap: 18px; }
 .calendar-editor { margin-top: 24px; background: #fff; border: 1px solid #eaecf0; border-radius: 12px; padding: 22px; }
 .calendar-editor h2 { font: 700 18px Manrope; margin: 0 0 6px; }

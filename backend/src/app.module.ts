@@ -12,9 +12,10 @@ import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SlaModule } from './sla/sla.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { ServiceRequestsModule } from './service-requests/service-requests.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AnalyticsModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, IncidentsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AnalyticsModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, ServiceRequestsModule, IncidentsModule],
   controllers: [AppController],
   providers: [AppService],
 })
