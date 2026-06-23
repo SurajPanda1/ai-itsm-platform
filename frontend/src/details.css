@@ -57,9 +57,12 @@ html[data-theme="dark"] .activity-type { background: #26313c; color: #dce5ee; }
 .admin-form label { display: grid; gap: 7px; margin: 14px 0; font-size: 13px; font-weight: 600; }
 .admin-form .primary { width: 100%; margin-top: 8px; }
 .admin-list h2 span { color: #98a2b3; font-weight: 500; }
-.admin-list > article:not(.group-card) { display: grid; grid-template-columns: 38px 1fr auto auto; gap: 12px; align-items: center; border-top: 1px solid #eaecf0; padding: 13px 0; }
+.admin-list > article:not(.group-card) { display: grid; grid-template-columns: 38px 1fr minmax(120px, auto) auto auto; gap: 12px; align-items: center; border-top: 1px solid #eaecf0; padding: 13px 0; }
 .admin-list article small { display: block; color: #667085; margin-top: 3px; }
 .role-pill { background: #f2f4f7; border-radius: 999px; padding: 5px 8px; font-size: 10px; font-weight: 700; }
+.role-pill-list { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+html[data-theme="dark"] .role-pill { background: #26313c; color: #dce5ee; }
+html[data-theme="dark"] .admin-list article small { color: #91a0af; }
 .secondary.small { padding: 7px 10px; font-size: 11px; }
 .group-card { border-top: 1px solid #eaecf0; padding: 16px 0; }
 .member-list { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }

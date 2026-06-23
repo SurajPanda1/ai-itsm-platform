@@ -6,7 +6,7 @@ import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
 import { PrismaService } from '../prisma/prisma.service';
 import { addSlaMinutes } from '../sla/sla-calendar';
 import { SlaService } from '../sla/sla.service';
-import { CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
+import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
 import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
 
 const serviceRequestInclude = {
@@ -16,7 +16,7 @@ const serviceRequestInclude = {
   createdBy: { select: { id: true, name: true, email: true } },
   assignedTo: { select: { id: true, name: true, email: true } },
   assignmentGroup: { select: { id: true, name: true } },
-  serviceRequest: { include: { catalogItem: { include: { category: true } } } },
+  serviceRequest: { include: { catalogItem: { include: { category: true, approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' as const } } } }, approvals: { include: { approver: { select: { id: true, name: true, email: true } } }, orderBy: { sequence: 'asc' as const } }, tasks: { include: { assignmentGroup: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' as const } } } },
   activities: { include: { createdBy: { select: { id: true, name: true } }, activityType: true }, orderBy: { createdAt: 'desc' as const } },
   slas: { include: { definition: { select: { id: true, name: true, version: true } } }, orderBy: { createdAt: 'desc' as const } },
 } satisfies Prisma.TicketInclude;
@@ -31,7 +31,7 @@ export class ServiceRequestsService {
       include: {
         items: {
           where: { active: true },
-          include: { defaultAssignmentGroup: { select: { id: true, name: true } } },
+          include: { defaultAssignmentGroup: { select: { id: true, name: true } }, approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' } } },
           orderBy: { name: 'asc' },
         },
       },
@@ -58,6 +58,7 @@ export class ServiceRequestsService {
         description: dto.description,
         defaultAssignmentGroupId: dto.defaultAssignmentGroupId,
         formSchema: (dto.formSchema ?? []) as Prisma.InputJsonValue,
+        taskTemplates: (dto.taskTemplates ?? []) as Prisma.InputJsonValue,
       },
       include: { category: true, defaultAssignmentGroup: { select: { id: true, name: true } } },
     });
@@ -75,6 +76,7 @@ export class ServiceRequestsService {
         description: dto.description,
         defaultAssignmentGroupId: dto.defaultAssignmentGroupId,
         formSchema: dto.formSchema === undefined ? undefined : (dto.formSchema as Prisma.InputJsonValue),
+        taskTemplates: dto.taskTemplates === undefined ? undefined : (dto.taskTemplates as Prisma.InputJsonValue),
         active: dto.active,
         updatedAt: new Date(),
       },
@@ -82,17 +84,45 @@ export class ServiceRequestsService {
     });
   }
 
+  async createApprovalRule(user: AuthUser, dto: CreateApprovalRuleDto) {
+    requireServiceDeskRole(user);
+    const item = await this.prisma.serviceCatalogItem.findFirst({ where: { id: dto.catalogItemId, organizationId: user.organizationId } });
+    if (!item) throw new BadRequestException('Service catalog item does not belong to this organization');
+    if (dto.approvalType === 'GROUP' && !dto.approvalGroupId) throw new BadRequestException('Approval group is required for group approval');
+    if (dto.approvalType === 'SPECIFIC_USER' && !dto.specificApproverId) throw new BadRequestException('Specific approver is required');
+    if (dto.approvalGroupId) {
+      const group = await this.prisma.assignmentGroup.findFirst({ where: { id: dto.approvalGroupId, organizationId: user.organizationId, active: true, groupType: { in: ['APPROVAL', 'BOTH'] } } });
+      if (!group) throw new BadRequestException('Approval group must be active and typed as Approval or Both');
+    }
+    if (dto.specificApproverId) {
+      const approver = await this.prisma.user.findFirst({ where: { id: dto.specificApproverId, organizationId: user.organizationId, active: true } });
+      if (!approver) throw new BadRequestException('Approver must be an active user in this organization');
+    }
+    return this.prisma.serviceApprovalRule.create({
+      data: {
+        catalogItemId: dto.catalogItemId,
+        sequence: dto.sequence,
+        approvalType: dto.approvalType,
+        approvalGroupId: dto.approvalGroupId,
+        specificApproverId: dto.specificApproverId,
+      },
+    });
+  }
+
   async createRequest(user: AuthUser, dto: CreateServiceRequestDto) {
-    const [dbUser, status, type, priority, item] = await Promise.all([
+    const [dbUser, openStatus, approvalStatus, type, priority, item] = await Promise.all([
       this.prisma.user.findFirst({ where: { id: user.id, organizationId: user.organizationId } }),
       this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'OPEN' } } }),
+      this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'AWAITING_APPROVAL' } } }),
       this.prisma.ticketType.findUnique({ where: { name: 'SERVICE_REQUEST' } }),
       this.prisma.priority.findUnique({ where: { name: 'MEDIUM' } }),
-      this.prisma.serviceCatalogItem.findFirst({ where: { id: dto.catalogItemId, organizationId: user.organizationId, active: true } }),
+      this.prisma.serviceCatalogItem.findFirst({ where: { id: dto.catalogItemId, organizationId: user.organizationId, active: true }, include: { approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' }, include: { approvalGroup: true, specificApprover: true } } } }),
     ]);
     if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
-    if (!status || !type || !priority) throw new BadRequestException('Required lookup data is missing');
+    if (!openStatus || !type || !priority) throw new BadRequestException('Required lookup data is missing');
     if (!item) throw new BadRequestException('Service catalog item is not available');
+    const requiresApproval = item.approvalRules.length > 0;
+    if (requiresApproval && !approvalStatus) throw new BadRequestException('AWAITING_APPROVAL status lookup is missing');
 
     const matchingSlas = await this.prisma.slaDefinition.findMany({
       where: { organizationId: user.organizationId, active: true, OR: [{ ticketTypeId: type.id }, { ticketTypeId: null }], AND: [{ OR: [{ priorityId: priority.id }, { priorityId: null }] }] },
@@ -115,7 +145,7 @@ export class ServiceRequestsService {
           ticketNumber,
           title: dto.title,
           description: dto.description,
-          statusId: status.id,
+          statusId: requiresApproval ? approvalStatus!.id : openStatus.id,
           ticketTypeId: type.id,
           priorityId: priority.id,
           assignmentGroupId: item.defaultAssignmentGroupId,
@@ -124,6 +154,15 @@ export class ServiceRequestsService {
         include: serviceRequestInclude,
       });
       await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE_SERVICE_REQUEST', newValue: { ticketNumber: ticket.ticketNumber, title: ticket.title, catalogItemId: item.id }, changedById: user.id } });
+      if (requiresApproval) {
+        for (const rule of item.approvalRules) {
+          const approverId = rule.approvalType === 'MANAGER' ? dbUser.managerId : rule.approvalType === 'GROUP' ? rule.approvalGroup?.managerId : rule.specificApproverId;
+          if (!approverId) throw new BadRequestException(`Approval rule ${rule.sequence} does not resolve to an approver`);
+          await tx.serviceApproval.create({ data: { serviceRequestId: ticket.serviceRequest!.id, approvalRuleId: rule.id, sequence: rule.sequence, approvalType: rule.approvalType, approverId } });
+        }
+      } else {
+        await this.createTasksFromTemplates(tx, ticket.serviceRequest!.id, user.id, item.taskTemplates);
+      }
       if (slaDefinition) {
         const startedAt = new Date();
         const dueDates = { responseDueAt: addSlaMinutes(startedAt, slaDefinition.responseTargetMinutes, slaDefinition.calendar), resolutionDueAt: addSlaMinutes(startedAt, slaDefinition.resolutionTargetMinutes, slaDefinition.calendar) };
@@ -199,6 +238,35 @@ export class ServiceRequestsService {
     });
   }
 
+  async decideApproval(user: AuthUser, id: string, approvalId: string, dto: DecideApprovalDto) {
+    const ticket = await this.prisma.ticket.findFirst({ where: { id, organizationId: user.organizationId, ticketType: { name: 'SERVICE_REQUEST' } }, include: serviceRequestInclude });
+    if (!ticket?.serviceRequest) throw new NotFoundException('Service request not found');
+    const approval = await this.prisma.serviceApproval.findFirst({ where: { id: approvalId, serviceRequestId: ticket.serviceRequest!.id }, include: { serviceRequest: { include: { catalogItem: true } } } });
+    if (!approval) throw new NotFoundException('Approval not found');
+    const serviceDesk = ['ADMIN', 'IT_AGENT', 'IT_SERVICE_MANAGER'].some((role) => user.roles.includes(role as any));
+    if (approval.approverId !== user.id && !serviceDesk) throw new BadRequestException('You are not allowed to decide this approval');
+    if (approval.status !== 'PENDING') throw new BadRequestException('Approval is already decided');
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      await tx.serviceApproval.update({ where: { id: approvalId }, data: { status: dto.decision, decisionComment: dto.decisionComment, decidedAt: now } });
+      await tx.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Approval ${dto.decision.toLowerCase()}${dto.decisionComment ? `: ${dto.decisionComment}` : ''}` } });
+      if (dto.decision === 'REJECTED') {
+        const rejected = await tx.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'REJECTED' } } });
+        if (!rejected) throw new BadRequestException('REJECTED status lookup is missing');
+        await tx.ticket.update({ where: { id }, data: { statusId: rejected.id, updatedAt: now } });
+        return tx.ticket.findUniqueOrThrow({ where: { id }, include: serviceRequestInclude });
+      }
+      const remaining = await tx.serviceApproval.count({ where: { serviceRequestId: ticket.serviceRequest!.id, status: 'PENDING' } });
+      if (remaining === 0) {
+        const open = await tx.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'OPEN' } } });
+        if (!open) throw new BadRequestException('OPEN status lookup is missing');
+        await tx.ticket.update({ where: { id }, data: { statusId: open.id, updatedAt: now } });
+        await this.createTasksFromTemplates(tx, ticket.serviceRequest!.id, user.id, approval.serviceRequest.catalogItem.taskTemplates);
+      }
+      return tx.ticket.findUniqueOrThrow({ where: { id }, include: serviceRequestInclude });
+    });
+  }
+
   private async ensureCategory(user: AuthUser, id: string) {
     const category = await this.prisma.serviceCatalogCategory.findFirst({ where: { id, organizationId: user.organizationId } });
     if (!category) throw new BadRequestException('Category does not belong to this organization');
@@ -209,5 +277,32 @@ export class ServiceRequestsService {
     const group = await this.prisma.assignmentGroup.findFirst({ where: { id, organizationId: user.organizationId, active: true } });
     if (!group) throw new BadRequestException('Assignment group does not belong to this organization');
     return group;
+  }
+
+  private async createTasksFromTemplates(tx: Prisma.TransactionClient, serviceRequestId: string, createdById: string, templates: Prisma.JsonValue) {
+    if (!Array.isArray(templates) || templates.length === 0) return;
+    for (const template of templates) {
+      if (!template || typeof template !== 'object' || Array.isArray(template)) continue;
+      const value = template as Record<string, unknown>;
+      const title = typeof value.title === 'string' && value.title.trim() ? value.title.trim() : 'Fulfillment task';
+      const description = typeof value.description === 'string' ? value.description : undefined;
+      const assignmentGroupId = typeof value.assignmentGroupId === 'string' ? value.assignmentGroupId : undefined;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('request_task_number:TASK'))`;
+      const [sequence] = await tx.$queryRaw<{ next: number }[]>`
+        SELECT (COALESCE(MAX(CAST(SUBSTRING(task_number FROM 5) AS INTEGER)), 0) + 1)::integer AS next
+        FROM request_tasks
+        WHERE task_number ~ '^TASK[0-9]{6}$'
+      `;
+      await tx.requestTask.create({
+        data: {
+          serviceRequestId,
+          taskNumber: `TASK${sequence.next.toString().padStart(6, '0')}`,
+          title,
+          description,
+          assignmentGroupId,
+          createdById,
+        },
+      });
+    }
   }
 }

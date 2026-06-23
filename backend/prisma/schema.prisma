@@ -44,14 +44,19 @@ model User {
   organizationId             String                  @map("organization_id") @db.Uuid
   roleId                     String                  @map("role_id") @db.Uuid
   departmentId               String?                 @map("department_id") @db.Uuid
+  managerId                  String?                 @map("manager_id") @db.Uuid
+  managerRequiredExempt      Boolean                 @default(false) @map("manager_required_exempt")
   name                       String                  @db.VarChar(100)
   email                      String                  @unique @db.VarChar(150)
+  phone                      String?                 @db.VarChar(40)
   passwordHash               String                  @map("password_hash")
   createdAt                  DateTime                @default(now()) @map("created_at")
   updatedAt                  DateTime                @default(now()) @map("updated_at")
   active                     Boolean                 @default(true)
   organization               Organization            @relation(fields: [organizationId], references: [id])
   role                       Role                    @relation(fields: [roleId], references: [id])
+  manager                    User?                   @relation("UserManager", fields: [managerId], references: [id])
+  directReports              User[]                  @relation("UserManager")
   createdTickets             Ticket[]                @relation("TicketCreator")
   assignedTickets            Ticket[]                @relation("TicketAssignee")
   activities                 TicketActivity[]
@@ -62,6 +67,10 @@ model User {
   directRoles                UserRole[]              @relation("UserRoleUser")
   grantedRoles               UserRole[]              @relation("UserRoleGrantedBy")
   requestedServiceRequests   ServiceRequest[]        @relation("ServiceRequestRequestedFor")
+  approvedServiceApprovals   ServiceApproval[]       @relation("ServiceApprovalApprover")
+  specificApprovalRules      ServiceApprovalRule[]   @relation("ServiceApprovalRuleApprover")
+  createdRequestTasks        RequestTask[]           @relation("RequestTaskCreator")
+  assignedRequestTasks       RequestTask[]           @relation("RequestTaskAssignee")
 
   @@map("users")
 }
@@ -176,6 +185,9 @@ model AssignmentGroup {
   organizationId String                  @map("organization_id") @db.Uuid
   name           String                  @db.VarChar(100)
   description    String?
+  email          String?                 @db.VarChar(150)
+  phone          String?                 @db.VarChar(40)
+  groupType      String                  @default("FULFILLMENT") @map("group_type") @db.VarChar(30)
   managerId      String?                 @map("manager_id") @db.Uuid
   active         Boolean                 @default(true)
   createdAt      DateTime                @default(now()) @map("created_at")
@@ -186,6 +198,8 @@ model AssignmentGroup {
   tickets        Ticket[]
   roles          AssignmentGroupRole[]
   serviceCatalogItems ServiceCatalogItem[]
+  approvalRules        ServiceApprovalRule[]
+  requestTasks         RequestTask[]
 
   @@unique([organizationId, name])
   @@map("assignment_groups")
@@ -263,6 +277,7 @@ model ServiceCatalogItem {
   description               String?
   defaultAssignmentGroupId  String?                 @map("default_assignment_group_id") @db.Uuid
   formSchema                Json                    @default("[]") @map("form_schema")
+  taskTemplates             Json                    @default("[]") @map("task_templates")
   active                    Boolean                 @default(true)
   createdAt                 DateTime                @default(now()) @map("created_at")
   updatedAt                 DateTime                @default(now()) @map("updated_at")
@@ -270,6 +285,7 @@ model ServiceCatalogItem {
   category                  ServiceCatalogCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   defaultAssignmentGroup    AssignmentGroup?        @relation(fields: [defaultAssignmentGroupId], references: [id])
   serviceRequests           ServiceRequest[]
+  approvalRules             ServiceApprovalRule[]
 
   @@unique([organizationId, name])
   @@index([categoryId])
@@ -289,10 +305,74 @@ model ServiceRequest {
   ticket           Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   requestedFor     User                @relation("ServiceRequestRequestedFor", fields: [requestedForId], references: [id])
   catalogItem      ServiceCatalogItem  @relation(fields: [catalogItemId], references: [id])
+  approvals        ServiceApproval[]
+  tasks            RequestTask[]
 
   @@index([catalogItemId])
   @@index([requestedForId])
   @@map("service_requests")
+}
+
+model ServiceApprovalRule {
+  id                        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  catalogItemId             String              @map("catalog_item_id") @db.Uuid
+  sequence                  Int
+  approvalType              String              @map("approval_type") @db.VarChar(30)
+  approvalGroupId           String?             @map("approval_group_id") @db.Uuid
+  specificApproverId        String?             @map("specific_approver_id") @db.Uuid
+  required                  Boolean             @default(true)
+  active                    Boolean             @default(true)
+  createdAt                 DateTime            @default(now()) @map("created_at")
+  catalogItem               ServiceCatalogItem  @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  approvalGroup             AssignmentGroup?    @relation(fields: [approvalGroupId], references: [id])
+  specificApprover          User?               @relation("ServiceApprovalRuleApprover", fields: [specificApproverId], references: [id])
+  approvals                 ServiceApproval[]
+
+  @@index([catalogItemId, sequence])
+  @@map("service_approval_rules")
+}
+
+model ServiceApproval {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serviceRequestId String          @map("service_request_id") @db.Uuid
+  approvalRuleId   String?         @map("approval_rule_id") @db.Uuid
+  sequence         Int
+  approvalType     String          @map("approval_type") @db.VarChar(30)
+  approverId       String?         @map("approver_id") @db.Uuid
+  status           String          @default("PENDING") @db.VarChar(30)
+  decisionComment  String?         @map("decision_comment")
+  decidedAt        DateTime?       @map("decided_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  serviceRequest   ServiceRequest  @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  approvalRule     ServiceApprovalRule? @relation(fields: [approvalRuleId], references: [id])
+  approver         User?           @relation("ServiceApprovalApprover", fields: [approverId], references: [id])
+
+  @@index([serviceRequestId, status])
+  @@index([approverId, status])
+  @@map("service_approvals")
+}
+
+model RequestTask {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serviceRequestId  String           @map("service_request_id") @db.Uuid
+  taskNumber        String           @unique @map("task_number") @db.VarChar(20)
+  title             String           @db.VarChar(200)
+  description       String?
+  assignmentGroupId String?          @map("assignment_group_id") @db.Uuid
+  assignedToId      String?          @map("assigned_to") @db.Uuid
+  status            String           @default("OPEN") @db.VarChar(30)
+  createdById       String           @map("created_by") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @default(now()) @map("updated_at")
+  completedAt       DateTime?        @map("completed_at")
+  serviceRequest    ServiceRequest   @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  assignmentGroup   AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
+  assignedTo        User?            @relation("RequestTaskAssignee", fields: [assignedToId], references: [id])
+  createdBy         User             @relation("RequestTaskCreator", fields: [createdById], references: [id])
+
+  @@index([serviceRequestId])
+  @@index([assignmentGroupId, status])
+  @@map("request_tasks")
 }
 
 model ActivityType {

@@ -6,7 +6,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminGuard } from './admin.guard';
-import { CreateBusinessCalendarDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, TestStorageConnectionDto, UpdateGroupDto, UpdateOrganizationSettingsDto, UpdateUserDto } from './admin.dto';
+import { CreateBusinessCalendarDto, CreateDepartmentDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, TestStorageConnectionDto, UpdateGroupDto, UpdateOrganizationSettingsDto, UpdateUserDto } from './admin.dto';
 import { Roles } from '../auth/roles';
 import { Prisma } from '@prisma/client';
 import { AttachmentConnectionService } from '../attachments/attachment-connection.service';
@@ -76,13 +76,22 @@ export class AdminController {
     return { roles, departments, priorities, ticketTypes, calendars };
   }
 
+  @Post('departments')
+  createDepartment(@CurrentUser() user: AuthUser, @Body() dto: CreateDepartmentDto) {
+    return this.prisma.$executeRaw`
+      INSERT INTO departments (organization_id, name, description)
+      VALUES (${user.organizationId}::uuid, ${dto.name}, ${dto.description ?? null})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+
   @Get('users')
   async users(@CurrentUser() user: AuthUser, @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number, @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number, @Query('search') search = '') {
     const take = Math.min(Math.max(limit, 1), 100);
     const currentPage = Math.max(page, 1);
     const where = { organizationId: user.organizationId, ...(search.trim() ? { OR: [{ name: { contains: search.trim(), mode: 'insensitive' as const } }, { email: { contains: search.trim(), mode: 'insensitive' as const } }] } : {}) };
     const [data, total] = await Promise.all([
-      this.prisma.user.findMany({ where, skip: (currentPage - 1) * take, take, select: { id: true, name: true, email: true, active: true, departmentId: true, directRoles: { select: { role: { select: { id: true, name: true } } } }, assignmentGroupMemberships: { select: { assignmentGroup: { select: { id: true, name: true, roles: { select: { role: { select: { id: true, name: true } } } } } } } } }, orderBy: { name: 'asc' } }),
+      this.prisma.user.findMany({ where, skip: (currentPage - 1) * take, take, select: { id: true, name: true, email: true, phone: true, active: true, departmentId: true, managerId: true, managerRequiredExempt: true, manager: { select: { id: true, name: true, email: true } }, directRoles: { select: { role: { select: { id: true, name: true } } } }, assignmentGroupMemberships: { select: { assignmentGroup: { select: { id: true, name: true, roles: { select: { role: { select: { id: true, name: true } } } } } } } } }, orderBy: { name: 'asc' } }),
       this.prisma.user.count({ where }),
     ]);
     return { data, page: currentPage, limit: take, total, totalPages: Math.max(1, Math.ceil(total / take)) };
@@ -90,12 +99,29 @@ export class AdminController {
 
   @Post('users')
   async createUser(@CurrentUser() user: AuthUser, @Body() dto: CreateUserDto) {
+    if (!dto.managerRequiredExempt && !dto.managerId) throw new BadRequestException('Manager is required unless the user is marked exempt');
+    if (dto.managerId) {
+      const manager = await this.prisma.user.findFirst({ where: { id: dto.managerId, organizationId: user.organizationId, active: true } });
+      if (!manager) throw new BadRequestException('Manager must be an active user in this organization');
+    }
     const employeeRole = await this.prisma.role.findUniqueOrThrow({ where: { name: Roles.Employee } });
-    return this.prisma.user.create({ data: { organizationId: user.organizationId, name: dto.name, email: dto.email.toLowerCase(), roleId: employeeRole.id, departmentId: dto.departmentId, passwordHash: await hash(dto.temporaryPassword, 12) }, select: { id: true, name: true, email: true, active: true } });
+    return this.prisma.user.create({ data: { organizationId: user.organizationId, name: dto.name, email: dto.email.toLowerCase(), phone: dto.phone, roleId: employeeRole.id, departmentId: dto.departmentId, managerId: dto.managerId, managerRequiredExempt: dto.managerRequiredExempt ?? false, passwordHash: await hash(dto.temporaryPassword, 12) }, select: { id: true, name: true, email: true, active: true } });
   }
 
   @Patch('users/:id')
-  updateUser(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
+  async updateUser(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
+    if (dto.managerId === id) throw new BadRequestException('A user cannot be their own manager');
+    if (dto.managerId) {
+      const manager = await this.prisma.user.findFirst({ where: { id: dto.managerId, organizationId: user.organizationId, active: true } });
+      if (!manager) throw new BadRequestException('Manager must be an active user in this organization');
+    }
+    if (dto.active === false) {
+      const [directReports, managedGroups] = await Promise.all([
+        this.prisma.user.count({ where: { organizationId: user.organizationId, managerId: id, active: true } }),
+        this.prisma.assignmentGroup.count({ where: { organizationId: user.organizationId, managerId: id, active: true } }),
+      ]);
+      if (directReports > 0 || managedGroups > 0) throw new BadRequestException('User is still a manager. Reassign their users/groups before deactivating.');
+    }
     return this.prisma.user.updateMany({ where: { id, organizationId: user.organizationId }, data: { ...dto, updatedAt: new Date() } });
   }
 
@@ -109,19 +135,25 @@ export class AdminController {
       ...(active === 'true' ? { active: true } : active === 'false' ? { active: false } : {}),
     };
     const [data, total] = await Promise.all([
-      this.prisma.assignmentGroup.findMany({ where, skip: (currentPage - 1) * take, take, include: { manager: { select: { id: true, name: true } }, roles: { select: { role: { select: { id: true, name: true } } } }, members: { select: { user: { select: { id: true, name: true, email: true, active: true } } } } }, orderBy: { name: 'asc' } }),
+      this.prisma.assignmentGroup.findMany({ where, skip: (currentPage - 1) * take, take, include: { manager: { select: { id: true, name: true, email: true } }, roles: { select: { role: { select: { id: true, name: true } } } }, members: { select: { user: { select: { id: true, name: true, email: true, active: true } } } } }, orderBy: { name: 'asc' } }),
       this.prisma.assignmentGroup.count({ where }),
     ]);
     return { data, page: currentPage, limit: take, total, totalPages: Math.max(1, Math.ceil(total / take)) };
   }
 
   @Post('groups')
-  createGroup(@CurrentUser() user: AuthUser, @Body() dto: CreateGroupDto) {
+  async createGroup(@CurrentUser() user: AuthUser, @Body() dto: CreateGroupDto) {
+    const manager = await this.prisma.user.findFirst({ where: { id: dto.managerId, organizationId: user.organizationId, active: true } });
+    if (!manager) throw new BadRequestException('Group manager must be an active user in this organization');
     return this.prisma.assignmentGroup.create({ data: { organizationId: user.organizationId, ...dto } });
   }
 
   @Patch('groups/:id')
-  updateGroup(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateGroupDto) {
+  async updateGroup(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateGroupDto) {
+    if (dto.managerId) {
+      const manager = await this.prisma.user.findFirst({ where: { id: dto.managerId, organizationId: user.organizationId, active: true } });
+      if (!manager) throw new BadRequestException('Group manager must be an active user in this organization');
+    }
     return this.prisma.assignmentGroup.updateMany({ where: { id, organizationId: user.organizationId }, data: { ...dto, updatedAt: new Date() } });
   }
 

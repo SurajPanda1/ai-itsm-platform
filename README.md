@@ -108,6 +108,8 @@ npx.cmd prisma db execute --file prisma/manual/009_organization_settings.sql --s
 npx.cmd prisma db execute --file prisma/manual/010_ticket_attachments.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/011_nextris_dark_theme.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/012_service_catalog_requests.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/013_approval_task_foundation.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/014_user_group_department_admin.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 

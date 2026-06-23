@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateServiceCategoryDto {
   @IsString()
@@ -31,6 +31,10 @@ export class CreateServiceCatalogItemDto {
   @IsOptional()
   @IsArray()
   formSchema?: unknown[];
+
+  @IsOptional()
+  @IsArray()
+  taskTemplates?: unknown[];
 }
 
 export class UpdateServiceCatalogItemDto {
@@ -53,6 +57,10 @@ export class UpdateServiceCatalogItemDto {
   formSchema?: unknown[];
 
   @IsOptional()
+  @IsArray()
+  taskTemplates?: unknown[];
+
+  @IsOptional()
   @IsBoolean()
   active?: boolean;
 }
@@ -73,4 +81,33 @@ export class CreateServiceRequestDto {
   @IsOptional()
   @IsObject()
   requestDetails?: Record<string, unknown>;
+}
+
+export class CreateApprovalRuleDto {
+  @IsUUID()
+  catalogItemId!: string;
+
+  @IsInt()
+  @Min(1)
+  sequence!: number;
+
+  @IsIn(['MANAGER', 'GROUP', 'SPECIFIC_USER'])
+  approvalType!: string;
+
+  @IsOptional()
+  @IsUUID()
+  approvalGroupId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  specificApproverId?: string;
+}
+
+export class DecideApprovalDto {
+  @IsIn(['APPROVED', 'REJECTED'])
+  decision!: string;
+
+  @IsOptional()
+  @IsString()
+  decisionComment?: string;
 }

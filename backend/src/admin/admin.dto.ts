@@ -3,31 +3,48 @@ import { IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsObject, IsOptional, IsStrin
 export class CreateUserDto {
   @IsString() @MinLength(2) @MaxLength(100) name!: string;
   @IsEmail() email!: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsUUID() departmentId?: string;
+  @IsOptional() @IsUUID() managerId?: string;
+  @IsOptional() @IsBoolean() managerRequiredExempt?: boolean;
   @IsString() @MinLength(8) temporaryPassword!: string;
 }
 
 export class UpdateUserDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(100) name?: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsUUID() departmentId?: string;
+  @IsOptional() @IsUUID() managerId?: string;
+  @IsOptional() @IsBoolean() managerRequiredExempt?: boolean;
   @IsOptional() @IsBoolean() active?: boolean;
 }
 
 export class CreateGroupDto {
   @IsString() @MinLength(2) @MaxLength(100) name!: string;
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsUUID() managerId?: string;
+  @IsEmail() email!: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
+  @IsIn(['FULFILLMENT', 'APPROVAL', 'BOTH']) groupType!: string;
+  @IsUUID() managerId!: string;
 }
 
 export class UpdateGroupDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(100) name?: string;
   @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
+  @IsOptional() @IsIn(['FULFILLMENT', 'APPROVAL', 'BOTH']) groupType?: string;
   @IsOptional() @IsUUID() managerId?: string;
   @IsOptional() @IsBoolean() active?: boolean;
 }
 
 export class GroupMemberDto { @IsUUID() userId!: string; }
 export class GroupRoleDto { @IsUUID() roleId!: string; }
+
+export class CreateDepartmentDto {
+  @IsString() @MinLength(2) @MaxLength(100) name!: string;
+  @IsOptional() @IsString() description?: string;
+}
 
 export class CreateSlaDefinitionDto {
   @IsString() @MinLength(2) @MaxLength(120) name!: string;

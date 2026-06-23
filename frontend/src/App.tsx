@@ -434,6 +434,7 @@ function IncidentDetail({
       setBusy(false);
     }
   }
+
   async function loadRelated() {
     try {
       setRelatedItems(await api.relatedItems(token, incident.id));
@@ -853,6 +854,7 @@ function ServiceRequestDetail({
   canEdit,
   canReopen,
   groups,
+  currentUserId,
   onUpdated,
   onClose,
 }: {
@@ -861,6 +863,7 @@ function ServiceRequestDetail({
   canEdit: boolean;
   canReopen: boolean;
   groups: AssignmentGroup[];
+  currentUserId: string;
   onUpdated: (value: Incident) => void;
   onClose: () => void;
 }) {
@@ -883,6 +886,18 @@ function ServiceRequestDetail({
       onUpdated(await api.changeServiceRequestStatus(token, request.id, status));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Status update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideApproval(approvalId: string, decision: "APPROVED" | "REJECTED") {
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated(await api.decideServiceApproval(token, request.id, approvalId, { decision }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update approval");
     } finally {
       setBusy(false);
     }
@@ -951,12 +966,12 @@ function ServiceRequestDetail({
             <b>{request.createdBy.name}</b>
           </div>
         </div>
+        <div className="detail-section request-description">
+          <h3>Description</h3>
+          <p>{request.description || "No description provided."}</p>
+        </div>
         <div className="operations-grid">
           <div>
-            <div className="detail-section">
-              <h3>Description</h3>
-              <p>{request.description || "No description provided."}</p>
-            </div>
             <div className="detail-section">
               <h3>Request details</h3>
               {Object.keys(details).length === 0 ? <p className="muted">No extra details submitted.</p> : (
@@ -974,6 +989,45 @@ function ServiceRequestDetail({
                 <dd>{new Date(request.createdAt).toLocaleString()}</dd>
               </dl>
             </div>
+            {request.serviceRequest?.approvals && request.serviceRequest.approvals.length > 0 && (
+              <div className="detail-section">
+                <h3>Approvals</h3>
+                <div className="related-list">
+                  {request.serviceRequest.approvals.map((approval) => (
+                    <article key={approval.id}>
+                      <b>Step {approval.sequence}</b>
+                      <div>
+                        <strong>{approval.approvalType.replace("_", " ")}</strong>
+                        <small>{approval.approver?.name || "Approver pending"} · {approval.status}</small>
+                      </div>
+                      {approval.status === "PENDING" && (canEdit || approval.approver?.id === currentUserId) ? (
+                        <span>
+                          <button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "APPROVED")}>Approve</button>{" "}
+                          <button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "REJECTED")}>Reject</button>
+                        </span>
+                      ) : <span className={`badge ${approval.status.toLowerCase()}`}>{approval.status}</span>}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            )}
+            {request.serviceRequest?.tasks && request.serviceRequest.tasks.length > 0 && (
+              <div className="detail-section">
+                <h3>Tasks</h3>
+                <div className="related-list">
+                  {request.serviceRequest.tasks.map((task) => (
+                    <article key={task.id}>
+                      <b>{task.taskNumber}</b>
+                      <div>
+                        <strong>{task.title}</strong>
+                        <small>{task.assignmentGroup?.name || "No group"} · {task.assignedTo?.name || "Unassigned"}</small>
+                      </div>
+                      <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div>
             {canEdit && (
@@ -1835,6 +1889,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           canEdit={canOperate}
           canReopen={isAdmin}
           groups={groups}
+          currentUserId={session.user.id}
           onClose={() => setSelectedRequest(null)}
           onUpdated={(updated) => {
             setSelectedRequest(updated);

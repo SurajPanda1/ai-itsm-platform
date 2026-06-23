@@ -190,13 +190,22 @@ export default function AdminConsole({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [storageTested, setStorageTested] = useState(false);
+  const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "add-department" | "department-list">("user-list");
+  const [editingGroup, setEditingGroup] = useState<AdminGroup | null>(null);
+  const [editGroup, setEditGroup] = useState({ name: "", description: "", email: "", phone: "", groupType: "FULFILLMENT", managerId: "", active: true });
   const [newUser, setNewUser] = useState({
     name: "",
     email: "",
+    phone: "",
     departmentId: "",
+    managerId: "",
+    managerRequiredExempt: false,
     temporaryPassword: "",
   });
-  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [editUser, setEditUser] = useState({ name: "", phone: "", departmentId: "", managerId: "", managerRequiredExempt: false, active: true });
+  const [newDepartment, setNewDepartment] = useState({ name: "", description: "" });
+  const [newGroup, setNewGroup] = useState({ name: "", description: "", email: "", phone: "", groupType: "FULFILLMENT", managerId: "" });
   const [newCategory, setNewCategory] = useState({ name: "", description: "" });
   const [newCatalogItem, setNewCatalogItem] = useState({
     categoryId: "",
@@ -204,6 +213,14 @@ export default function AdminConsole({
     description: "",
     defaultAssignmentGroupId: "",
     formSchema: '[{"key":"details","label":"Request details","type":"textarea","required":true}]',
+    taskTemplates: "[]",
+  });
+  const [newApprovalRule, setNewApprovalRule] = useState({
+    catalogItemId: "",
+    sequence: 1,
+    approvalType: "MANAGER",
+    approvalGroupId: "",
+    specificApproverId: "",
   });
   const [newSla, setNewSla] = useState({
     name: "",
@@ -252,6 +269,10 @@ export default function AdminConsole({
         ...value,
         categoryId: value.categoryId || c[0]?.id || "",
       }));
+      setNewApprovalRule((value) => ({
+        ...value,
+        catalogItemId: value.catalogItemId || c.flatMap((category) => category.items)[0]?.id || "",
+      }));
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Could not load admin data",
@@ -277,14 +298,81 @@ export default function AdminConsole({
       await api.createAdminUser(token, {
         ...newUser,
         departmentId: newUser.departmentId || undefined,
+        managerId: newUser.managerId || undefined,
       });
       setNewUser({
         name: "",
         email: "",
+        phone: "",
         departmentId: "",
+        managerId: "",
+        managerRequiredExempt: false,
         temporaryPassword: "",
       });
       await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+  function startEditUser(user: AdminUser) {
+    setEditingUser(user);
+    setEditUser({
+      name: user.name,
+      phone: user.phone || "",
+      departmentId: user.departmentId || "",
+      managerId: user.managerId || "",
+      managerRequiredExempt: user.managerRequiredExempt || false,
+      active: user.active,
+    });
+  }
+  function startEditGroup(group: AdminGroup) {
+    setEditingGroup(group);
+    setEditGroup({ name: group.name, description: group.description || "", email: group.email || "", phone: group.phone || "", groupType: group.groupType || "FULFILLMENT", managerId: group.manager?.id || "", active: group.active });
+  }
+  async function saveGroupEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingGroup) return;
+    setBusy(true); setError("");
+    try {
+      await api.updateAdminGroup(token, editingGroup.id, { ...editGroup, managerId: editGroup.managerId || undefined, phone: editGroup.phone || undefined });
+      setEditingGroup(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update group");
+    } finally { setBusy(false); }
+  }
+  async function saveUserEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingUser) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateAdminUser(token, editingUser.id, {
+        name: editUser.name,
+        phone: editUser.phone || undefined,
+        departmentId: editUser.departmentId || undefined,
+        managerId: editUser.managerId || undefined,
+        managerRequiredExempt: editUser.managerRequiredExempt,
+        active: editUser.active,
+      });
+      setEditingUser(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update user");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createDepartment(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api.createDepartment(token, newDepartment);
+      setNewDepartment({ name: "", description: "" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create department");
     } finally {
       setBusy(false);
     }
@@ -294,7 +382,7 @@ export default function AdminConsole({
     setBusy(true);
     try {
       await api.createAdminGroup(token, newGroup);
-      setNewGroup({ name: "", description: "" });
+      setNewGroup({ name: "", description: "", email: "", phone: "", groupType: "FULFILLMENT", managerId: "" });
       await load();
     } finally {
       setBusy(false);
@@ -326,17 +414,45 @@ export default function AdminConsole({
       } catch {
         throw new Error("Form schema must be valid JSON array.");
       }
+      let taskTemplates: unknown[] = [];
+      try {
+        const parsed = JSON.parse(newCatalogItem.taskTemplates || "[]");
+        taskTemplates = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        throw new Error("Task templates must be a valid JSON array.");
+      }
       await api.createServiceCatalogItem(token, {
         categoryId: newCatalogItem.categoryId,
         name: newCatalogItem.name,
         description: newCatalogItem.description,
         defaultAssignmentGroupId: newCatalogItem.defaultAssignmentGroupId || undefined,
         formSchema,
+        taskTemplates,
       });
       setNewCatalogItem((value) => ({ ...value, name: "", description: "" }));
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create catalogue item");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createApprovalRule(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api.createServiceApprovalRule(token, {
+        catalogItemId: newApprovalRule.catalogItemId,
+        sequence: newApprovalRule.sequence,
+        approvalType: newApprovalRule.approvalType,
+        approvalGroupId: newApprovalRule.approvalType === "GROUP" ? newApprovalRule.approvalGroupId : undefined,
+        specificApproverId: newApprovalRule.approvalType === "SPECIFIC_USER" ? newApprovalRule.specificApproverId : undefined,
+      });
+      setNewApprovalRule((value) => ({ ...value, sequence: value.sequence + 1 }));
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create approval rule");
     } finally {
       setBusy(false);
     }
@@ -480,7 +596,14 @@ export default function AdminConsole({
         {saved && <div className="success">{saved}</div>}
         {tab === "users" && (
           <div className="admin-grid">
-            <form className="admin-form" onSubmit={createUser}>
+            <div className="admin-form-stack">
+              <div className="admin-form admin-card-menu">
+                <button type="button" className={usersPanel === "add-user" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("add-user")}>Add User</button>
+                <button type="button" className={usersPanel === "user-list" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("user-list")}>User List</button>
+                <button type="button" className={usersPanel === "add-department" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("add-department")}>Add Department</button>
+                <button type="button" className={usersPanel === "department-list" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("department-list")}>Department List</button>
+              </div>
+            {usersPanel === "add-user" && <form className="admin-form" onSubmit={createUser}>
               <h2>Add user</h2>
               <p className="muted">
                 Employee access is automatic; elevated access comes from groups.
@@ -507,6 +630,15 @@ export default function AdminConsole({
                 />
               </label>
               <label>
+                Phone
+                <input
+                  value={newUser.phone}
+                  onChange={(e) =>
+                    setNewUser({ ...newUser, phone: e.target.value })
+                  }
+                />
+              </label>
+              <label>
                 Department
                 <select
                   value={newUser.departmentId}
@@ -521,6 +653,38 @@ export default function AdminConsole({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label>
+                Manager
+                <select
+                  value={newUser.managerId}
+                  onChange={(e) =>
+                    setNewUser({ ...newUser, managerId: e.target.value })
+                  }
+                  required={!newUser.managerRequiredExempt}
+                  disabled={newUser.managerRequiredExempt}
+                >
+                  <option value="">Select manager</option>
+                  {users.filter((u) => u.active).map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={newUser.managerRequiredExempt}
+                  onChange={(e) =>
+                    setNewUser({
+                      ...newUser,
+                      managerRequiredExempt: e.target.checked,
+                      managerId: e.target.checked ? "" : newUser.managerId,
+                    })
+                  }
+                />
+                Manager not required for this user
               </label>
               <label>
                 Temporary password
@@ -540,8 +704,70 @@ export default function AdminConsole({
               <button className="primary" disabled={busy}>
                 Create user
               </button>
-            </form>
-            <div className="admin-list">
+            </form>}
+            {usersPanel === "add-department" && <form className="admin-form" onSubmit={createDepartment}>
+              <h2>Add department</h2>
+              <label>
+                Department name
+                <input required value={newDepartment.name} onChange={(e) => setNewDepartment({ ...newDepartment, name: e.target.value })} />
+              </label>
+              <label>
+                Description
+                <textarea rows={3} value={newDepartment.description} onChange={(e) => setNewDepartment({ ...newDepartment, description: e.target.value })} />
+              </label>
+              <button className="primary" disabled={busy}>Create department</button>
+            </form>}
+            {editingUser && usersPanel === "user-list" && (
+              <form className="admin-form" onSubmit={saveUserEdit}>
+                <h2>Edit user</h2>
+                <p className="muted">{editingUser.email}</p>
+                <label>
+                  Name
+                  <input required value={editUser.name} onChange={(e) => setEditUser({ ...editUser, name: e.target.value })} />
+                </label>
+                <label>
+                  Phone
+                  <input value={editUser.phone} onChange={(e) => setEditUser({ ...editUser, phone: e.target.value })} />
+                </label>
+                <label>
+                  Department
+                  <select value={editUser.departmentId} onChange={(e) => setEditUser({ ...editUser, departmentId: e.target.value })}>
+                    <option value="">No department</option>
+                    {reference.departments.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Manager
+                  <select value={editUser.managerId} onChange={(e) => setEditUser({ ...editUser, managerId: e.target.value })} required={!editUser.managerRequiredExempt} disabled={editUser.managerRequiredExempt}>
+                    <option value="">Select manager</option>
+                    {users.filter((u) => u.active && u.id !== editingUser.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" checked={editUser.managerRequiredExempt} onChange={(e) => setEditUser({ ...editUser, managerRequiredExempt: e.target.checked, managerId: e.target.checked ? "" : editUser.managerId })} />
+                  Manager not required for this user
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" checked={editUser.active} onChange={(e) => setEditUser({ ...editUser, active: e.target.checked })} />
+                  Active
+                </label>
+                <div className="modal-actions">
+                  <button type="button" className="secondary" onClick={() => setEditingUser(null)}>Cancel</button>
+                  <button className="primary" disabled={busy}>Save user</button>
+                </div>
+              </form>
+            )}
+            </div>
+            {usersPanel === "department-list" && <div className="admin-list">
+              <h2>Departments <span>{reference.departments.length}</span></h2>
+              {reference.departments.map((department) => (
+                <article key={department.id}>
+                  <div className="avatar">{department.name.slice(0,2).toUpperCase()}</div>
+                  <div><b>{department.name}</b><small>{department.description || "No description"}</small></div>
+                </article>
+              ))}
+            </div>}
+            {usersPanel === "user-list" && <div className="admin-list">
               <div className="admin-list-head">
                 <h2>
                   Users <span>{total}</span>
@@ -563,20 +789,14 @@ export default function AdminConsole({
                   <div>
                     <b>{u.name}</b>
                     <small>{u.email}</small>
+                    {u.phone && <small>{u.phone}</small>}
+                    <small>Manager: {u.manager?.name || (u.managerRequiredExempt ? "Exempt" : "Missing")}</small>
                   </div>
-                  <span className="role-pill">
-                    {effectiveRoles(u).join(", ")}
-                  </span>
-                  <button
-                    className="secondary small"
-                    onClick={async () => {
-                      await api.updateAdminUser(token, u.id, {
-                        active: !u.active,
-                      });
-                      await load();
-                    }}
-                  >
-                    {u.active ? "Deactivate" : "Activate"}
+                  <div className="role-pill-list">
+                    {effectiveRoles(u).map((role) => <span className="role-pill" key={role}>{role}</span>)}
+                  </div>
+                  <button className="secondary small" onClick={() => startEditUser(u)}>
+                    Edit
                   </button>
                 </article>
               ))}
@@ -599,11 +819,12 @@ export default function AdminConsole({
                   Next
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
         )}
         {tab === "groups" && (
           <div className="admin-grid">
+            <div className="admin-form-stack">
             <form className="admin-form" onSubmit={createGroup}>
               <h2>Add assignment group</h2>
               <label>
@@ -626,8 +847,82 @@ export default function AdminConsole({
                   }
                 />
               </label>
+              <label>
+                Group email
+                <input
+                  required
+                  type="email"
+                  value={newGroup.email}
+                  onChange={(e) =>
+                    setNewGroup({ ...newGroup, email: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Phone
+                <input
+                  value={newGroup.phone}
+                  onChange={(e) =>
+                    setNewGroup({ ...newGroup, phone: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Group type
+                <select
+                  value={newGroup.groupType}
+                  onChange={(e) =>
+                    setNewGroup({ ...newGroup, groupType: e.target.value })
+                  }
+                >
+                  <option value="FULFILLMENT">Fulfillment</option>
+                  <option value="APPROVAL">Approval</option>
+                  <option value="BOTH">Both</option>
+                </select>
+              </label>
+              <label>
+                Group manager
+                <select
+                  required
+                  value={newGroup.managerId}
+                  onChange={(e) =>
+                    setNewGroup({ ...newGroup, managerId: e.target.value })
+                  }
+                >
+                  <option value="">Select manager</option>
+                  {users.filter((u) => u.active).map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button className="primary">Create group</button>
             </form>
+            {editingGroup && (
+              <form className="admin-form" onSubmit={saveGroupEdit}>
+                <h2>Edit assignment group</h2>
+                <label>Name<input required value={editGroup.name} onChange={(e)=>setEditGroup({...editGroup,name:e.target.value})}/></label>
+                <label>Description<textarea rows={3} value={editGroup.description} onChange={(e)=>setEditGroup({...editGroup,description:e.target.value})}/></label>
+                <label>Email<input required type="email" value={editGroup.email} onChange={(e)=>setEditGroup({...editGroup,email:e.target.value})}/></label>
+                <label>Phone<input value={editGroup.phone} onChange={(e)=>setEditGroup({...editGroup,phone:e.target.value})}/></label>
+                <label>Group type<select value={editGroup.groupType} onChange={(e)=>setEditGroup({...editGroup,groupType:e.target.value})}><option value="FULFILLMENT">Fulfillment</option><option value="APPROVAL">Approval</option><option value="BOTH">Both</option></select></label>
+                <label>Manager<select required value={editGroup.managerId} onChange={(e)=>setEditGroup({...editGroup,managerId:e.target.value})}><option value="">Select manager</option>{users.filter(u=>u.active).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+                <label className="check-row"><input type="checkbox" checked={editGroup.active} onChange={(e)=>setEditGroup({...editGroup,active:e.target.checked})}/>Active</label>
+                <h3>Roles</h3>
+                <div className="member-list role-list">{editingGroup.roles.map((x)=><span key={x.role.id}>{x.role.name}<button type="button" onClick={async()=>{await api.removeGroupRole(token,editingGroup.id,x.role.id);await load();}}>×</button></span>)}</div>
+                <select defaultValue="" onChange={async(e)=>{if(e.target.value)await api.addGroupRole(token,editingGroup.id,e.target.value);e.target.value="";await load();}}>
+                  <option value="">Grant role…</option>{reference.roles.filter(r=>r.name!=="EMPLOYEE"&&!editingGroup.roles.some(x=>x.role.id===r.id)).map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                <h3>Members</h3>
+                <div className="member-list">{editingGroup.members.map((x)=><span key={x.user.id}>{x.user.name}<button type="button" onClick={async()=>{await api.removeGroupMember(token,editingGroup.id,x.user.id);await load();}}>×</button></span>)}</div>
+                <select defaultValue="" onChange={async(e)=>{if(e.target.value)await api.addGroupMember(token,editingGroup.id,e.target.value);e.target.value="";await load();}}>
+                  <option value="">Add member…</option>{users.filter(u=>u.active&&!editingGroup.members.some(x=>x.user.id===u.id)).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+                <div className="modal-actions"><button type="button" className="secondary" onClick={()=>setEditingGroup(null)}>Cancel</button><button className="primary" disabled={busy}>Save group</button></div>
+              </form>
+            )}
+            </div>
             <div className="admin-list">
               <div className="admin-list-head">
                 <h2>
@@ -664,80 +959,15 @@ export default function AdminConsole({
                 <article className="group-card" key={g.id}>
                   <b>{g.name}</b>
                   <small>{g.description || "No description"}</small>
+                  <small>{g.groupType || "FULFILLMENT"} · {g.email || "No group email"}{g.phone ? ` · ${g.phone}` : ""} · Manager: {g.manager?.name || "Missing"}</small>
                   <div className="member-list role-list">
-                    {g.roles.map((x) => (
-                      <span key={x.role.id}>
-                        {x.role.name}
-                        <button
-                          onClick={async () => {
-                            await api.removeGroupRole(token, g.id, x.role.id);
-                            await load();
-                          }}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+                    {g.roles.map((x) => <span key={x.role.id}>{x.role.name}</span>)}
                   </div>
-                  <select
-                    defaultValue=""
-                    onChange={async (e) => {
-                      if (e.target.value)
-                        await api.addGroupRole(token, g.id, e.target.value);
-                      e.target.value = "";
-                      await load();
-                    }}
-                  >
-                    <option value="">Grant role…</option>
-                    {reference.roles
-                      .filter(
-                        (r) =>
-                          r.name !== "EMPLOYEE" &&
-                          !g.roles.some((x) => x.role.id === r.id),
-                      )
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                  </select>
                   <div className="member-list">
-                    {g.members.map((x) => (
-                      <span key={x.user.id}>
-                        {x.user.name}
-                        <button
-                          onClick={async () => {
-                            await api.removeGroupMember(token, g.id, x.user.id);
-                            await load();
-                          }}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+                    {g.members.slice(0, 6).map((x) => <span key={x.user.id}>{x.user.name}</span>)}
+                    {g.members.length > 6 && <span>+{g.members.length - 6} more</span>}
                   </div>
-                  <select
-                    defaultValue=""
-                    onChange={async (e) => {
-                      if (e.target.value)
-                        await api.addGroupMember(token, g.id, e.target.value);
-                      e.target.value = "";
-                      await load();
-                    }}
-                  >
-                    <option value="">Add member…</option>
-                    {users
-                      .filter(
-                        (u) =>
-                          u.active &&
-                          !g.members.some((x) => x.user.id === u.id),
-                      )
-                      .map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}
-                        </option>
-                      ))}
-                  </select>
+                  <button className="secondary small" onClick={() => startEditGroup(g)}>Edit</button>
                 </article>
               ))}
               <div className="pagination">
@@ -812,7 +1042,56 @@ export default function AdminConsole({
                   <textarea rows={4} value={newCatalogItem.formSchema} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, formSchema: e.target.value })} />
                   <small className="muted">Stored now for future dynamic forms. Current request form uses the default request details field.</small>
                 </label>
+                <label>
+                  Task templates
+                  <textarea rows={5} value={newCatalogItem.taskTemplates} onChange={(e) => setNewCatalogItem({ ...newCatalogItem, taskTemplates: e.target.value })} />
+                  <small className="muted">JSON array, e.g. [{"{"}"title":"Create account","assignmentGroupId":"group-id"{"}"}]. These become TASK records after approvals are not required or later approved.</small>
+                </label>
                 <button className="primary" disabled={busy || catalog.length === 0}>Create catalogue item</button>
+              </form>
+              <form className="admin-form" onSubmit={createApprovalRule}>
+                <h2>Add approval rule</h2>
+                <p className="muted">
+                  Approval rules run in sequence. Manager approval uses the requester's manager.
+                </p>
+                <label>
+                  Catalogue item
+                  <select required value={newApprovalRule.catalogItemId} onChange={(e) => setNewApprovalRule({ ...newApprovalRule, catalogItemId: e.target.value })}>
+                    <option value="">Select catalogue item</option>
+                    {catalog.flatMap((category) => category.items.map((item) => <option key={item.id} value={item.id}>{category.name} — {item.name}</option>))}
+                  </select>
+                </label>
+                <label>
+                  Sequence
+                  <input type="number" min={1} value={newApprovalRule.sequence} onChange={(e) => setNewApprovalRule({ ...newApprovalRule, sequence: Number(e.target.value) })} />
+                </label>
+                <label>
+                  Approval type
+                  <select value={newApprovalRule.approvalType} onChange={(e) => setNewApprovalRule({ ...newApprovalRule, approvalType: e.target.value })}>
+                    <option value="MANAGER">Requester's manager</option>
+                    <option value="GROUP">Approval group manager</option>
+                    <option value="SPECIFIC_USER">Specific user</option>
+                  </select>
+                </label>
+                {newApprovalRule.approvalType === "GROUP" && (
+                  <label>
+                    Approval group
+                    <select required value={newApprovalRule.approvalGroupId} onChange={(e) => setNewApprovalRule({ ...newApprovalRule, approvalGroupId: e.target.value })}>
+                      <option value="">Select approval group</option>
+                      {groups.filter((group) => group.active && ["APPROVAL", "BOTH"].includes(group.groupType || "")).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                {newApprovalRule.approvalType === "SPECIFIC_USER" && (
+                  <label>
+                    Approver
+                    <select required value={newApprovalRule.specificApproverId} onChange={(e) => setNewApprovalRule({ ...newApprovalRule, specificApproverId: e.target.value })}>
+                      <option value="">Select approver</option>
+                      {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                <button className="primary" disabled={busy || !newApprovalRule.catalogItemId}>Create approval rule</button>
               </form>
             </div>
             <div className="admin-list">
@@ -829,6 +1108,7 @@ export default function AdminConsole({
                           <b>{item.name}</b>
                           <small>{item.description || "No description"}</small>
                           <small>Routes to {item.defaultAssignmentGroup?.name || "No default group"}</small>
+                          <small>{item.approvalRules?.length || 0} approval rule(s) · {Array.isArray(item.taskTemplates) ? item.taskTemplates.length : 0} task template(s)</small>
                         </div>
                         <button
                           className="secondary small"

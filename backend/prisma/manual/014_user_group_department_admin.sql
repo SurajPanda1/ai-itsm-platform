@@ -1,0 +1,7 @@
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS phone VARCHAR(40);
+
+ALTER TABLE assignment_groups
+  ADD COLUMN IF NOT EXISTS phone VARCHAR(40);
+
+CREATE INDEX IF NOT EXISTS users_phone_idx ON users(phone);
