@@ -4,7 +4,7 @@ AI-first, lightweight IT service management platform for small and mid-sized org
 
 ## Current status
 
-The PostgreSQL foundation and the first end-to-end incident-management slice are operational.
+The PostgreSQL foundation, incident-management slice, service-request foundation, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
 
 Completed in the current MVP:
 
@@ -16,7 +16,8 @@ Completed in the current MVP:
 - One-hour inactivity timeout and twelve-hour maximum session
 - Organization-level data isolation
 - Incident creation, listing, details, editing, assignment, status, resolution, comments, and work notes
-- Service Catalogue foundation with categories, catalogue items, default routing groups, and employee service request submission/listing
+- Service Catalogue with category tiles, catalogue items, default routing groups, approval rules, admin-friendly form-field helpers, task-template helpers, and employee service request submission/listing
+- Service Request fulfilment with approvals, approval decisions, generated request tasks, task assignment, task status updates, work notes, attachments, and SLA snapshots
 - Sequential incident numbers such as `INC000002`
 - Assignment groups and group membership
 - Related child incidents, changes, and problems
@@ -28,10 +29,11 @@ Completed in the current MVP:
 - Admin-configured attachment storage with live connection testing
 - Ticket attachment upload, listing, download, deletion, metadata, permissions, and audit logging
 - Storage adapters for local/on-premises filesystems, Amazon S3, Azure Blob, Google Cloud Storage, and MinIO/S3-compatible services
-- Analytics Console with incident KPIs, trends, SLA outcomes, aging, workload reporting, filters, scoped access, and CSV export
+- Analytics Console with Incident and Service Request module reporting, KPIs, trends, SLA outcomes, aging, workload reporting, filters, scoped access, and CSV export
+- Admin Console for users, departments, assignment groups, service catalogue, approval rules, SLA policies, business calendars, branding, theme defaults, and attachment storage
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
-Problem, change, CMDB, knowledge, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests now have a first foundation slice; advanced request fulfilment, approvals, and configurable form rendering are still upcoming.
+Problem, change, CMDB, knowledge, notifications, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests now have the first request-to-fulfilment workflow, but richer dynamic form rendering, approval maintenance, request-task reporting, and production-grade workflow automation are still upcoming.
 
 ## Architecture
 
@@ -173,12 +175,18 @@ Service Requests:
 
 - `GET /api/service-requests/catalog`
 - `POST /api/service-requests/catalog/categories`
+- `PATCH /api/service-requests/catalog/categories/:id`
 - `POST /api/service-requests/catalog/items`
 - `PATCH /api/service-requests/catalog/items/:id`
+- `POST /api/service-requests/catalog/approval-rules`
 - `POST /api/service-requests`
 - `GET /api/service-requests`
 - `GET /api/service-requests/:id`
 - `PATCH /api/service-requests/:id/status`
+- `PATCH /api/service-requests/:id/assignment`
+- `POST /api/service-requests/:id/comments`
+- `PATCH /api/service-requests/:id/approvals/:approvalId`
+- `PATCH /api/service-requests/:id/tasks/:taskId`
 
 Supporting endpoints:
 
@@ -202,21 +210,34 @@ Supporting endpoints:
 - `GET /api/admin/slas`
 - `POST /api/admin/slas`
 
+## Admin Console and service catalogue
+
+The Admin Console uses a left-side feature navigator and right-side workspace pattern. Current administrative areas include:
+
+- **Users**: add users, list/edit users, add departments, and edit departments.
+- **Assignment Groups**: add/list/edit groups, assign group roles, manage members, and maintain manager/email/phone metadata.
+- **Service Catalogue**: manage categories as tiles, drill into catalogue items, edit categories/items, add approval rules, and add simple form fields/task templates without hand-writing JSON.
+- **SLA Policies**: create SLA policies and business calendars, and deactivate existing policy versions.
+- **Branding & Storage**: configure organization identity, logo/favicon, colors, theme defaults, attachment provider, storage location, and connection testing.
+
+Catalogue item form schema and task templates are stored as JSON so the platform remains flexible, but the admin UI provides helper controls for the common cases. Generated request tasks are created after approvals are complete, or immediately when the catalogue item does not require approval.
+
 ## SLA foundation
 
-SLA policies are organization-specific and versioned. New incidents snapshot the matching response and resolution targets so later policy changes do not rewrite historical performance. First work notes record response performance; incident resolution records resolution performance. The engine supports 24×7 and timezone-aware business-hours calendars, holiday exclusion, Awaiting Customer pause/resume, live countdowns, and scheduled at-risk/breach evaluation. The initial Admin calendar form creates Monday–Friday 09:00–17:00 calendars; a richer per-day and holiday editor remains planned.
+SLA policies are organization-specific and versioned. New incidents and service requests snapshot the matching response and resolution targets so later policy changes do not rewrite historical performance. First work notes record response performance; resolution records resolution performance. The engine supports 24×7 and timezone-aware business-hours calendars, holiday exclusion, Awaiting Customer pause/resume, live countdowns, and scheduled at-risk/breach evaluation. The initial Admin calendar form creates Monday–Friday 09:00–17:00 calendars; a richer per-day and holiday editor remains planned.
 
 ## Verification
 
 ```powershell
 cd backend
 npm.cmd run build
+npm.cmd test
 
 cd ../frontend
 npm.cmd run build
 ```
 
-Both builds must pass before committing.
+Both builds and the backend test suite must pass before committing.
 
 Run the self-cleaning SLA database verification when changing SLA persistence or lifecycle behavior:
 
@@ -241,8 +262,9 @@ Before production use, the project still requires automated tests, managed migra
 
 ## Next milestones
 
-1. Add browser-level regression tests for incident, attachment, branding, Admin Console, and Analytics workflows.
-2. Build the service-request module and request catalogue.
-3. Implement problems and changes/approvals.
-4. Implement CMDB and knowledge management.
-5. Add the Analytics Console, notifications, and AI-assisted operations.
+1. Add browser-level regression tests for incident, service request, approval, request task, attachment, branding, Admin Console, and Analytics workflows.
+2. Improve the Service Request form renderer so catalogue form schema fields are shown to employees as real dynamic fields.
+3. Add approval-rule list/edit/deactivate screens and richer request-task reporting.
+4. Implement Problem and Change modules, including change approvals and risk workflows.
+5. Implement CMDB and knowledge management.
+6. Add notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.
