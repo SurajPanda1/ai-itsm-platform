@@ -49,6 +49,7 @@ export const api = {
   createServiceCatalogItem: (token: string, input: object) => request('/service-requests/catalog/items', { method: 'POST', body: JSON.stringify(input) }, token),
   updateServiceCatalogItem: (token: string, id: string, input: object) => request(`/service-requests/catalog/items/${id}`, { method: 'PATCH', body: JSON.stringify(input) }, token),
   createServiceApprovalRule: (token: string, input: object) => request('/service-requests/catalog/approval-rules', { method: 'POST', body: JSON.stringify(input) }, token),
+  updateServiceApprovalRule: (token: string, id: string, input: object) => request(`/service-requests/catalog/approval-rules/${id}`, { method: 'PATCH', body: JSON.stringify(input) }, token),
   serviceRequests: (token: string) => request<Incident[]>('/service-requests', {}, token),
   createServiceRequest: (token: string, input: object) => request<Incident>('/service-requests', { method: 'POST', body: JSON.stringify(input) }, token),
   changeServiceRequestStatus: (token: string, id: string, status: string) => request<Incident>(`/service-requests/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }, token),

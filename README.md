@@ -239,6 +239,17 @@ npm.cmd run build
 
 Both builds and the backend test suite must pass before committing.
 
+Browser smoke tests use Playwright and run against the local web app. Start the backend and frontend first, then provide a test login:
+
+```powershell
+cd frontend
+$env:E2E_EMAIL="admin@example.com"
+$env:E2E_PASSWORD="replace-with-test-password"
+npm.cmd run test:e2e
+```
+
+If `E2E_EMAIL` or `E2E_PASSWORD` is not set, the browser tests are skipped safely.
+
 Run the self-cleaning SLA database verification when changing SLA persistence or lifecycle behavior:
 
 ```powershell

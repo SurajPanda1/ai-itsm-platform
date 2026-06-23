@@ -3,7 +3,7 @@ import { AuthUser } from '../auth/auth-user';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AddCommentDto, AssignIncidentDto, ChangeStatusDto } from '../incidents/dto/incident-actions.dto';
-import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
+import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateApprovalRuleDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
 import { ServiceRequestsService } from './service-requests.service';
 
 @Controller('service-requests')
@@ -39,6 +39,11 @@ export class ServiceRequestsController {
   @Post('catalog/approval-rules')
   createApprovalRule(@CurrentUser() user: AuthUser, @Body() dto: CreateApprovalRuleDto) {
     return this.serviceRequests.createApprovalRule(user, dto);
+  }
+
+  @Patch('catalog/approval-rules/:id')
+  updateApprovalRule(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateApprovalRuleDto) {
+    return this.serviceRequests.updateApprovalRule(user, id, dto);
   }
 
   @Post()

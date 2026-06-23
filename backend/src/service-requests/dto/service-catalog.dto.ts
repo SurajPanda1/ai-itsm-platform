@@ -115,6 +115,29 @@ export class CreateApprovalRuleDto {
   specificApproverId?: string;
 }
 
+export class UpdateApprovalRuleDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  sequence?: number;
+
+  @IsOptional()
+  @IsIn(['MANAGER', 'GROUP', 'SPECIFIC_USER'])
+  approvalType?: string;
+
+  @IsOptional()
+  @IsUUID()
+  approvalGroupId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  specificApproverId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
 export class DecideApprovalDto {
   @IsIn(['APPROVED', 'REJECTED'])
   decision!: string;

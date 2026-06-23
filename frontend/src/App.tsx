@@ -242,9 +242,16 @@ function CreateServiceRequest({
   const items = catalog.flatMap((category) => category.items.map((item) => ({ ...item, categoryName: category.name })));
   const [catalogItemId, setCatalogItemId] = useState(items[0]?.id || "");
   const selectedItem = items.find((item) => item.id === catalogItemId);
+  const schemaFields = Array.isArray(selectedItem?.formSchema) ? selectedItem.formSchema.filter((field): field is { key: string; label: string; type?: string; required?: boolean } => {
+    if (!field || typeof field !== "object" || Array.isArray(field)) return false;
+    const value = field as Record<string, unknown>;
+    return typeof value.key === "string" && typeof value.label === "string";
+  }) : [];
   const [form, setForm] = useState({ title: "", description: "", details: "" });
+  const [requestDetails, setRequestDetails] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { setRequestDetails({}); }, [catalogItemId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -259,7 +266,7 @@ function CreateServiceRequest({
         catalogItemId,
         title: form.title,
         description: form.description,
-        requestDetails: { details: form.details },
+        requestDetails: schemaFields.length > 0 ? requestDetails : { details: form.details },
       }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create service request");
@@ -297,7 +304,24 @@ function CreateServiceRequest({
         </label>
         <label>
           Request details
-          <textarea value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} rows={4} placeholder="Add access name, software, device details, business reason, etc." />
+          {schemaFields.length === 0 ? (
+            <textarea value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} rows={4} placeholder="Add access name, software, device details, business reason, etc." />
+          ) : (
+            <div className="dynamic-request-fields">
+              {schemaFields.map((field) => {
+                const value = requestDetails[field.key] || "";
+                const setValue = (next: string) => setRequestDetails({ ...requestDetails, [field.key]: next });
+                return <label key={field.key}>
+                  {field.label}{field.required ? " *" : ""}
+                  {field.type === "textarea" ? (
+                    <textarea rows={3} value={value} required={field.required} onChange={(e) => setValue(e.target.value)} />
+                  ) : (
+                    <input type={field.type === "number" || field.type === "date" ? field.type : "text"} value={value} required={field.required} onChange={(e) => setValue(e.target.value)} />
+                  )}
+                </label>;
+              })}
+            </div>
+          )}
         </label>
         {selectedItem?.defaultAssignmentGroup && <p className="muted">Routes to {selectedItem.defaultAssignmentGroup.name}</p>}
         {error && <div className="error">{error}</div>}

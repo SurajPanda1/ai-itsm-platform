@@ -110,6 +110,7 @@ html[data-theme="dark"] .analytics-kpis article,html[data-theme="dark"] .analyti
 html[data-theme="dark"] .catalog-item-row { border-color: #28323d; background: #0d141b; }
 .task-edit-row { display: grid; gap: 8px; min-width: 220px; }
 .task-edit-row select { width: 100%; }
+.dynamic-request-fields { display: grid; gap: 12px; }
 .catalog-tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
 .catalog-category-tile { border: 1px solid #eaecf0; border-radius: 14px; padding: 14px; display: grid; gap: 12px; background: #fff; }
 .catalog-tile-main { border: 0; background: transparent; color: inherit; padding: 0; text-align: left; display: grid; gap: 6px; cursor: pointer; }

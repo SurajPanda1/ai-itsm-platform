@@ -7,6 +7,7 @@ import type {
   ReferenceData,
   ServiceCatalogCategory,
   ServiceCatalogItem,
+  ServiceApprovalRule,
   SlaDefinition,
 } from "./types";
 import { rawTimeZones } from "@vvo/tzdb";
@@ -193,7 +194,7 @@ export default function AdminConsole({
   const [storageTested, setStorageTested] = useState(false);
   const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "add-department" | "department-list" | "edit-department">("user-list");
   const [groupsPanel, setGroupsPanel] = useState<"add-group" | "group-list" | "edit-group">("group-list");
-  const [catalogPanel, setCatalogPanel] = useState<"add-category" | "add-item" | "add-approval" | "catalog-list" | "category-items" | "edit-category" | "edit-item">("catalog-list");
+  const [catalogPanel, setCatalogPanel] = useState<"add-category" | "add-item" | "add-approval" | "approval-list" | "edit-approval" | "catalog-list" | "category-items" | "edit-category" | "edit-item">("catalog-list");
   const [slaPanel, setSlaPanel] = useState<"add-sla" | "add-calendar" | "sla-list" | "edit-sla">("sla-list");
   const [settingsPanel, setSettingsPanel] = useState<"branding" | "storage">("branding");
   const [editingGroup, setEditingGroup] = useState<AdminGroup | null>(null);
@@ -215,6 +216,8 @@ export default function AdminConsole({
   const [selectedCategory, setSelectedCategory] = useState<ServiceCatalogCategory | null>(null);
   const [editingCategory, setEditingCategory] = useState<ServiceCatalogCategory | null>(null);
   const [editCategory, setEditCategory] = useState({ name: "", description: "" });
+  const [editingApprovalRule, setEditingApprovalRule] = useState<ServiceApprovalRule | null>(null);
+  const [editApprovalRule, setEditApprovalRule] = useState({ catalogItemId: "", sequence: 1, approvalType: "MANAGER", approvalGroupId: "", specificApproverId: "", active: true });
   const [fieldDraft, setFieldDraft] = useState({ key: "", label: "", type: "text", required: false });
   const [taskDraft, setTaskDraft] = useState({ title: "", description: "", assignmentGroupId: "" });
   const [newDepartment, setNewDepartment] = useState({ name: "", description: "" });
@@ -372,6 +375,18 @@ export default function AdminConsole({
     setEditCategory({ name: category.name, description: category.description || "" });
     setCatalogPanel("edit-category");
   }
+  function startEditApprovalRule(rule: ServiceApprovalRule, catalogItemId: string) {
+    setEditingApprovalRule(rule);
+    setEditApprovalRule({
+      catalogItemId,
+      sequence: rule.sequence,
+      approvalType: rule.approvalType,
+      approvalGroupId: rule.approvalGroupId || rule.approvalGroup?.id || "",
+      specificApproverId: rule.specificApproverId || rule.specificApprover?.id || "",
+      active: rule.active,
+    });
+    setCatalogPanel("edit-approval");
+  }
   function startEditSla(sla: SlaDefinition) {
     setEditingSla(sla);
     setSlaPanel("edit-sla");
@@ -449,6 +464,28 @@ export default function AdminConsole({
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not update category");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveApprovalRuleEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingApprovalRule) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateServiceApprovalRule(token, editingApprovalRule.id, {
+        sequence: editApprovalRule.sequence,
+        approvalType: editApprovalRule.approvalType,
+        approvalGroupId: editApprovalRule.approvalType === "GROUP" ? editApprovalRule.approvalGroupId : undefined,
+        specificApproverId: editApprovalRule.approvalType === "SPECIFIC_USER" ? editApprovalRule.specificApproverId : undefined,
+        active: editApprovalRule.active,
+      });
+      setEditingApprovalRule(null);
+      setCatalogPanel("approval-list");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update approval rule");
     } finally {
       setBusy(false);
     }
@@ -1163,6 +1200,7 @@ export default function AdminConsole({
                 <button type="button" className={catalogPanel === "add-category" ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("add-category")}>Add Category</button>
                 <button type="button" className={catalogPanel === "add-item" ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("add-item")}>Add Catalogue Item</button>
                 <button type="button" className={catalogPanel === "add-approval" ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("add-approval")}>Add Approval Rule</button>
+                <button type="button" className={["approval-list", "edit-approval"].includes(catalogPanel) ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("approval-list")}>Approval Rule List</button>
                 <button type="button" className={["catalog-list", "category-items", "edit-category", "edit-item"].includes(catalogPanel) ? "secondary active" : "secondary"} onClick={() => setCatalogPanel("catalog-list")}>Catalogue List</button>
               </div>
               {catalogPanel === "add-category" && <form className="admin-form" onSubmit={createCategory}>
@@ -1284,6 +1322,53 @@ export default function AdminConsole({
                 )}
                 <button className="primary" disabled={busy || !newApprovalRule.catalogItemId}>Create approval rule</button>
               </form>}
+              {editingApprovalRule && catalogPanel === "edit-approval" && <form className="admin-form" onSubmit={saveApprovalRuleEdit}>
+                <h2>Edit approval rule</h2>
+                <label>
+                  Catalogue item
+                  <select disabled value={editApprovalRule.catalogItemId}>
+                    {catalog.flatMap((category) => category.items.map((item) => <option key={item.id} value={item.id}>{category.name} — {item.name}</option>))}
+                  </select>
+                </label>
+                <label>
+                  Sequence
+                  <input type="number" min={1} value={editApprovalRule.sequence} onChange={(e) => setEditApprovalRule({ ...editApprovalRule, sequence: Number(e.target.value) })} />
+                </label>
+                <label>
+                  Approval type
+                  <select value={editApprovalRule.approvalType} onChange={(e) => setEditApprovalRule({ ...editApprovalRule, approvalType: e.target.value })}>
+                    <option value="MANAGER">Requester's manager</option>
+                    <option value="GROUP">Approval group manager</option>
+                    <option value="SPECIFIC_USER">Specific user</option>
+                  </select>
+                </label>
+                {editApprovalRule.approvalType === "GROUP" && (
+                  <label>
+                    Approval group
+                    <select required value={editApprovalRule.approvalGroupId} onChange={(e) => setEditApprovalRule({ ...editApprovalRule, approvalGroupId: e.target.value })}>
+                      <option value="">Select approval group</option>
+                      {groups.filter((group) => group.active && ["APPROVAL", "BOTH"].includes(group.groupType || "")).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                {editApprovalRule.approvalType === "SPECIFIC_USER" && (
+                  <label>
+                    Approver
+                    <select required value={editApprovalRule.specificApproverId} onChange={(e) => setEditApprovalRule({ ...editApprovalRule, specificApproverId: e.target.value })}>
+                      <option value="">Select approver</option>
+                      {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className="check-row">
+                  <input type="checkbox" checked={editApprovalRule.active} onChange={(e) => setEditApprovalRule({ ...editApprovalRule, active: e.target.checked })} />
+                  Active
+                </label>
+                <div className="modal-actions">
+                  <button type="button" className="secondary" onClick={() => { setEditingApprovalRule(null); setCatalogPanel("approval-list"); }}>Cancel</button>
+                  <button className="primary" disabled={busy}>Save approval rule</button>
+                </div>
+              </form>}
               {editingCatalogItem && catalogPanel === "edit-item" && <form className="admin-form" onSubmit={saveCatalogItemEdit}>
                 <h2>Edit catalogue item</h2>
                 <p className="muted">
@@ -1360,6 +1445,22 @@ export default function AdminConsole({
                 </div>
               </form>}
             </div>
+            {catalogPanel === "approval-list" && <div className="admin-list">
+              <h2>Approval Rules <span>{catalog.reduce((total, category) => total + category.items.reduce((itemTotal, item) => itemTotal + (item.approvalRules?.length || 0), 0), 0)}</span></h2>
+              {catalog.every((category) => category.items.every((item) => !item.approvalRules?.length)) && <p className="muted">No active approval rules yet.</p>}
+              <div className="catalog-items">
+                {catalog.flatMap((category) => category.items.flatMap((item) => (item.approvalRules || []).map((rule) => (
+                  <div className="catalog-item-row" key={rule.id}>
+                    <div>
+                      <b>{category.name} — {item.name}</b>
+                      <small>Step {rule.sequence} · {rule.approvalType.replace("_", " ")}</small>
+                      <small>{rule.approvalType === "MANAGER" ? "Requester's manager" : rule.approvalType === "GROUP" ? rule.approvalGroup?.name || "Approval group missing" : rule.specificApprover?.name || "Specific approver missing"}</small>
+                    </div>
+                    <button className="secondary small" onClick={() => startEditApprovalRule(rule, item.id)}>Edit</button>
+                  </div>
+                ))))}
+              </div>
+            </div>}
             {catalogPanel === "catalog-list" && <div className="admin-list">
               <h2>Categories <span>{catalog.length}</span></h2>
               {catalog.length === 0 && <p className="muted">No request categories yet.</p>}

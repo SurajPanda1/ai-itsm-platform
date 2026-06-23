@@ -6,7 +6,7 @@ import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
 import { PrismaService } from '../prisma/prisma.service';
 import { addSlaMinutes } from '../sla/sla-calendar';
 import { SlaService } from '../sla/sla.service';
-import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
+import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateApprovalRuleDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
 import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
 
 const serviceRequestInclude = {
@@ -31,7 +31,7 @@ export class ServiceRequestsService {
       include: {
         items: {
           where: { active: true },
-          include: { defaultAssignmentGroup: { select: { id: true, name: true } }, approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' } } },
+          include: { defaultAssignmentGroup: { select: { id: true, name: true } }, approvalRules: { where: { active: true }, include: { approvalGroup: { select: { id: true, name: true } }, specificApprover: { select: { id: true, name: true, email: true } } }, orderBy: { sequence: 'asc' } } },
           orderBy: { name: 'asc' },
         },
       },
@@ -116,6 +116,37 @@ export class ServiceRequestsService {
         approvalGroupId: dto.approvalGroupId,
         specificApproverId: dto.specificApproverId,
       },
+    });
+  }
+
+  async updateApprovalRule(user: AuthUser, id: string, dto: UpdateApprovalRuleDto) {
+    requireServiceDeskRole(user);
+    const rule = await this.prisma.serviceApprovalRule.findFirst({ where: { id, catalogItem: { organizationId: user.organizationId } } });
+    if (!rule) throw new NotFoundException('Approval rule not found');
+    const approvalType = dto.approvalType ?? rule.approvalType;
+    if (approvalType === 'GROUP') {
+      const groupId = dto.approvalGroupId ?? rule.approvalGroupId;
+      if (!groupId) throw new BadRequestException('Approval group is required for group approval');
+      const group = await this.prisma.assignmentGroup.findFirst({ where: { id: groupId, organizationId: user.organizationId, active: true, groupType: { in: ['APPROVAL', 'BOTH'] } } });
+      if (!group) throw new BadRequestException('Approval group must be active and typed as Approval or Both');
+    }
+    if (approvalType === 'SPECIFIC_USER') {
+      const approverId = dto.specificApproverId ?? rule.specificApproverId;
+      if (!approverId) throw new BadRequestException('Specific approver is required');
+      const approver = await this.prisma.user.findFirst({ where: { id: approverId, organizationId: user.organizationId, active: true } });
+      if (!approver) throw new BadRequestException('Approver must be an active user in this organization');
+    }
+    return this.prisma.serviceApprovalRule.update({
+      where: { id },
+      data: {
+        sequence: dto.sequence,
+        approvalType: dto.approvalType,
+        approvalGroupId: approvalType === 'GROUP' ? dto.approvalGroupId ?? rule.approvalGroupId : null,
+        specificApproverId: approvalType === 'SPECIFIC_USER' ? dto.specificApproverId ?? rule.specificApproverId : null,
+        active: dto.active,
+        updatedAt: new Date(),
+      },
+      include: { approvalGroup: { select: { id: true, name: true } }, specificApprover: { select: { id: true, name: true, email: true } } },
     });
   }
 
