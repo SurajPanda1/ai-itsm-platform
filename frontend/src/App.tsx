@@ -302,27 +302,27 @@ function CreateServiceRequest({
           Description
           <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} placeholder="Short summary of the request" />
         </label>
-        <label>
-          Request details
-          {schemaFields.length === 0 ? (
+        {schemaFields.length === 0 ? (
+          <label>
+            Request details
             <textarea value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} rows={4} placeholder="Add access name, software, device details, business reason, etc." />
-          ) : (
-            <div className="dynamic-request-fields">
-              {schemaFields.map((field) => {
-                const value = requestDetails[field.key] || "";
-                const setValue = (next: string) => setRequestDetails({ ...requestDetails, [field.key]: next });
-                return <label key={field.key}>
-                  {field.label}{field.required ? " *" : ""}
-                  {field.type === "textarea" ? (
-                    <textarea rows={3} value={value} required={field.required} onChange={(e) => setValue(e.target.value)} />
-                  ) : (
-                    <input type={field.type === "number" || field.type === "date" ? field.type : "text"} value={value} required={field.required} onChange={(e) => setValue(e.target.value)} />
-                  )}
-                </label>;
-              })}
-            </div>
-          )}
-        </label>
+          </label>
+        ) : (
+          <div className="dynamic-request-fields">
+            {schemaFields.map((field) => {
+              const value = requestDetails[field.key] || "";
+              const setValue = (next: string) => setRequestDetails({ ...requestDetails, [field.key]: next });
+              return <label key={field.key}>
+                {field.label}{field.required ? " *" : ""}
+                {field.type === "textarea" ? (
+                  <textarea rows={3} value={value} required={field.required} onChange={(e) => setValue(e.target.value)} />
+                ) : (
+                  <input type={field.type === "number" || field.type === "date" ? field.type : "text"} value={value} required={field.required} onChange={(e) => setValue(e.target.value)} />
+                )}
+              </label>;
+            })}
+          </div>
+        )}
         {selectedItem?.defaultAssignmentGroup && <p className="muted">Routes to {selectedItem.defaultAssignmentGroup.name}</p>}
         {error && <div className="error">{error}</div>}
         <div className="modal-actions">
