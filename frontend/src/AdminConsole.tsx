@@ -996,7 +996,6 @@ export default function AdminConsole({
                   ))}
                 </select>
               </label>
-              <label>Interface theme<select value={settings.branding.themeMode||"DARK"} onChange={e=>setSettings({...settings,branding:{...settings.branding,themeMode:e.target.value as OrganizationSettings['branding']['themeMode']}})}><option value="DARK">Nextris Dark</option><option value="LIGHT">Light</option><option value="SYSTEM">Use device setting</option></select></label>
               <label className="check-row">
                 <input
                   type="checkbox"

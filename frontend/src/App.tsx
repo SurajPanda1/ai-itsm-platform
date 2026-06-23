@@ -17,7 +17,20 @@ import type {
 
 const sessionKey = "ai-itsm-session";
 const activityKey = "ai-itsm-last-activity";
+const themePreferenceKey = "ai-itsm-theme-preference";
 const defaultBranding: Branding = { organizationName: "Nextris", portalTitle: "Nextris Sevā", welcomeMessage: "How can we help?", primaryColor: "#16a394", accentColor: "#6ee7b7", showPoweredBy: true, themeMode: "DARK" };
+type ThemePreference = "DARK" | "LIGHT" | "SYSTEM";
+
+function resolveTheme(themeMode: ThemePreference) {
+  if (themeMode === "SYSTEM") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return themeMode.toLowerCase();
+}
+
+function applyThemePreference(themeMode: ThemePreference) {
+  document.documentElement.dataset.theme = resolveTheme(themeMode);
+}
 
 function Brand({ branding }: { branding: Branding }) {
   return <div className="brand">{branding.logoUrl ? <img className="brand-logo" src={branding.logoUrl} alt={`${branding.organizationName} logo`} /> : <span className="brand-mark">{branding.organizationName.slice(0, 1).toUpperCase()}</span>}<span>{branding.portalTitle || branding.organizationName}</span></div>;
@@ -1189,7 +1202,7 @@ function AdminConsole({
   );
 }
 
-function Dashboard({ session, onLogout, branding }: { session: Session; onLogout: () => void; branding: Branding }) {
+function Dashboard({ session, onLogout, branding, themePreference, onThemePreferenceChange }: { session: Session; onLogout: () => void; branding: Branding; themePreference: ThemePreference; onThemePreferenceChange: (value: ThemePreference) => void }) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1205,6 +1218,7 @@ function Dashboard({ session, onLogout, branding }: { session: Session; onLogout
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [adminOpen, setAdminOpen] = useState(false);
   const [analyticsOpen,setAnalyticsOpen]=useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   useEffect(() => {
     api
       .incidents(session.accessToken)
@@ -1273,11 +1287,11 @@ function Dashboard({ session, onLogout, branding }: { session: Session; onLogout
           {!isEmployee&&<a className="admin-link" onClick={()=>setAnalyticsOpen(true)}>▥ <span>Analytics Console</span></a>}
         </nav>
         <div className="user-block">
-          <div className="avatar">
+          <button className="avatar user-menu-trigger" title="User menu" onClick={() => setUserMenuOpen((value) => !value)}>
             {session.user.name.slice(0, 2).toUpperCase()}
-          </div>
+          </button>
           <div>
-            <strong>{session.user.name}</strong>
+            <button className="user-name-button" onClick={() => setUserMenuOpen((value) => !value)}>{session.user.name}</button>
             <small>
               {session.user.roles
                 .filter((role) => role !== "EMPLOYEE")
@@ -1287,6 +1301,21 @@ function Dashboard({ session, onLogout, branding }: { session: Session; onLogout
           <button title="Sign out" onClick={onLogout}>
             ↗
           </button>
+          {userMenuOpen && (
+            <div className="user-menu">
+              <label>
+                Theme
+                <select
+                  value={themePreference}
+                  onChange={(event) => onThemePreferenceChange(event.target.value as ThemePreference)}
+                >
+                  <option value="DARK">Nextris Dark</option>
+                  <option value="LIGHT">Light</option>
+                  <option value="SYSTEM">Use device setting</option>
+                </select>
+              </label>
+            </div>
+          )}
         </div>
       </aside>
       <main className="workspace">
@@ -1478,7 +1507,20 @@ export default function App() {
     }
   });
   const [branding, setBranding] = useState<Branding>(defaultBranding);
-  useEffect(() => { api.branding().then(value => { const next = { ...defaultBranding, ...value }; setBranding(next); document.title = next.portalTitle || next.organizationName || "Nextris Sevā"; document.documentElement.style.setProperty("--brand-primary", next.primaryColor!); document.documentElement.style.setProperty("--brand-accent", next.accentColor!); document.documentElement.dataset.theme = next.themeMode === "SYSTEM" ? (window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light') : next.themeMode?.toLowerCase() || "dark"; if (next.faviconUrl) { let icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]'); if (!icon) { icon = document.createElement("link"); icon.rel = "icon"; document.head.appendChild(icon); } icon.href = next.faviconUrl; } }).catch(() => {document.documentElement.dataset.theme="dark"}); }, []);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
+    const saved = localStorage.getItem(themePreferenceKey) as ThemePreference | null;
+    return saved && ["DARK", "LIGHT", "SYSTEM"].includes(saved) ? saved : "DARK";
+  });
+  useEffect(() => { api.branding().then(value => { const next = { ...defaultBranding, ...value }; setBranding(next); document.title = next.portalTitle || next.organizationName || "Nextris Sevā"; document.documentElement.style.setProperty("--brand-primary", next.primaryColor!); document.documentElement.style.setProperty("--brand-accent", next.accentColor!); applyThemePreference(themePreference); if (next.faviconUrl) { let icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]'); if (!icon) { icon = document.createElement("link"); icon.rel = "icon"; document.head.appendChild(icon); } icon.href = next.faviconUrl; } }).catch(() => {applyThemePreference(themePreference)}); }, [themePreference]);
+  useEffect(() => {
+    applyThemePreference(themePreference);
+    localStorage.setItem(themePreferenceKey, themePreference);
+    if (themePreference !== "SYSTEM") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const listener = () => applyThemePreference("SYSTEM");
+    media.addEventListener("change", listener);
+    return () => media.removeEventListener("change", listener);
+  }, [themePreference]);
   useEffect(() => {
     if (!session) return;
     let lastWrite = 0;
@@ -1518,5 +1560,5 @@ export default function App() {
       setSession(null);
     }
   }
-  return session ? <Dashboard session={session} onLogout={logout} branding={branding} /> : <Login onLogin={login} branding={branding} />;
+  return session ? <Dashboard session={session} onLogout={logout} branding={branding} themePreference={themePreference} onThemePreferenceChange={setThemePreference} /> : <Login onLogin={login} branding={branding} />;
 }

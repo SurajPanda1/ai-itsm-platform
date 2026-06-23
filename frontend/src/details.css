@@ -5,6 +5,9 @@
 .detail-meta > div { background: #f9fafb; border: 1px solid #eaecf0; border-radius: 9px; padding: 13px; }
 .detail-meta small, .detail-meta b { display: block; }
 .detail-meta small { color: #667085; margin-bottom: 8px; }
+html[data-theme="dark"] .detail-meta > div { background: #111820; border-color: #28323d; color: #e7edf4; }
+html[data-theme="dark"] .detail-meta small { color: #91a0af; }
+html[data-theme="dark"] .detail-meta b { color: #f3f7fb; }
 .detail-section { border-top: 1px solid #eaecf0; padding-top: 20px; margin-top: 20px; }
 .detail-section h3 { font: 700 15px Manrope; }
 .detail-section p { color: #475467; line-height: 1.6; }
