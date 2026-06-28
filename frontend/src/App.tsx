@@ -365,6 +365,43 @@ function CreateProblem({ token, onCreated, onClose }: { token: string; onCreated
   );
 }
 
+function CreateChange({ token, onCreated, onClose }: { token: string; onCreated: (i: Incident) => void; onClose: () => void }) {
+  const [form, setForm] = useState({ title: "", description: "", priority: "MEDIUM", changeType: "NORMAL", risk: "MEDIUM", impact: "MEDIUM", plannedStart: "", plannedEnd: "", implementationPlan: "", backoutPlan: "", testPlan: "" });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      onCreated(await api.createChange(token, { ...form, plannedStart: form.plannedStart || undefined, plannedEnd: form.plannedEnd || undefined }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create change");
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="modal record-form-modal" onSubmit={submit}>
+        <div className="modal-head"><div><p className="eyebrow">CHANGE MANAGEMENT</p><h2>Create change</h2></div><button type="button" className="icon-button" onClick={onClose}>{"\u00d7"}</button></div>
+        <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} minLength={3} maxLength={200} required autoFocus /></label>
+        <label>Description<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></label>
+        <div className="form-grid">
+          <label>Type<select value={form.changeType} onChange={(e) => setForm({ ...form, changeType: e.target.value })}>{["STANDARD","NORMAL","EMERGENCY"].map((x)=><option key={x}>{x}</option>)}</select></label>
+          <label>Risk<select value={form.risk} onChange={(e) => setForm({ ...form, risk: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
+          <label>Impact<select value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
+          <label>Priority<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
+          <label>Planned start<input type="datetime-local" value={form.plannedStart} onChange={(e) => setForm({ ...form, plannedStart: e.target.value })} /></label>
+          <label>Planned end<input type="datetime-local" value={form.plannedEnd} onChange={(e) => setForm({ ...form, plannedEnd: e.target.value })} /></label>
+        </div>
+        <label>Implementation plan<textarea value={form.implementationPlan} onChange={(e) => setForm({ ...form, implementationPlan: e.target.value })} rows={3} /></label>
+        <label>Backout plan<textarea value={form.backoutPlan} onChange={(e) => setForm({ ...form, backoutPlan: e.target.value })} rows={3} /></label>
+        <label>Test plan<textarea value={form.testPlan} onChange={(e) => setForm({ ...form, testPlan: e.target.value })} rows={3} /></label>
+        {error && <div className="error">{error}</div>}
+        <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Creating..." : "Create change"}</button></div>
+      </form>
+    </div>
+  );
+}
+
 function IncidentDetail({
   incident,
   token,
@@ -385,6 +422,7 @@ function IncidentDetail({
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [fullscreen, setFullscreen] = useState(false);
   const [form, setForm] = useState({
     title: incident.title,
     description: incident.description || "",
@@ -546,7 +584,7 @@ function IncidentDetail({
       className="modal-backdrop"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <section className="modal detail-modal">
+      <section className={`modal detail-modal prb-detail-modal ${fullscreen ? "fullscreen" : ""}`}>
         <div className="modal-head">
           <div>
             <p className="eyebrow">{incident.ticketNumber}</p>
@@ -928,86 +966,21 @@ function ServiceRequestDetail({
   const [assigneeId, setAssigneeId] = useState(request.assignedTo?.id || "");
   const [note, setNote] = useState("");
   const [taskEdits, setTaskEdits] = useState<Record<string, { status: string; assignmentGroupId: string; assignedToId: string }>>({});
-  const [activeTab, setActiveTab] = useState<"work-notes" | "attachments">("work-notes");
+  const [activeTab, setActiveTab] = useState<"work-notes" | "approvals" | "tasks" | "attachments">("work-notes");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const details = request.serviceRequest?.requestDetails || {};
+  const [fullscreen, setFullscreen] = useState(false);
   const selectedGroup = groups.find((group) => group.id === groupId);
+  const approvals = request.serviceRequest?.approvals || [];
+  const tasks = request.serviceRequest?.tasks || [];
 
-  async function updateStatus() {
-    setBusy(true);
-    setError("");
-    try {
-      onUpdated(await api.changeServiceRequestStatus(token, request.id, status));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Status update failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function decideApproval(approvalId: string, decision: "APPROVED" | "REJECTED") {
-    setBusy(true);
-    setError("");
-    try {
-      onUpdated(await api.decideServiceApproval(token, request.id, approvalId, { decision }));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not update approval");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function assign() {
-    if (!groupId || !assigneeId) return;
-    setBusy(true);
-    setError("");
-    try {
-      onUpdated(await api.assignServiceRequest(token, request.id, { assignmentGroupId: groupId, assignedToId: assigneeId }));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Assignment failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addNote() {
-    if (!note.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api.addServiceRequestActivity(token, request.id, note, canEdit ? "WORK_NOTE" : "COMMENT");
-      const refreshed = await api.serviceRequests(token);
-      const value = refreshed.find((item) => item.id === request.id);
-      if (value) onUpdated(value);
-      setNote("");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not add activity");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function updateTask(taskId: string) {
-    const value = taskEdits[taskId];
-    if (!value) return;
-    setBusy(true);
-    setError("");
-    try {
-      onUpdated(await api.updateServiceRequestTask(token, request.id, taskId, {
-        status: value.status,
-        assignmentGroupId: value.assignmentGroupId || undefined,
-        assignedToId: value.assignedToId || undefined,
-      }));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not update task");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  async function updateStatus() { setBusy(true); setError(""); try { onUpdated(await api.changeServiceRequestStatus(token, request.id, status)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Status update failed"); } finally { setBusy(false); } }
+  async function decideApproval(approvalId: string, decision: "APPROVED" | "REJECTED") { setBusy(true); setError(""); try { onUpdated(await api.decideServiceApproval(token, request.id, approvalId, { decision })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update approval"); } finally { setBusy(false); } }
+  async function assign() { if (!groupId || !assigneeId) return; setBusy(true); setError(""); try { onUpdated(await api.assignServiceRequest(token, request.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
+  async function addNote() { if (!note.trim()) return; setBusy(true); setError(""); try { await api.addServiceRequestActivity(token, request.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.serviceRequests(token); const value = refreshed.find((item) => item.id === request.id); if (value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
+  async function updateTask(taskId: string) { const value = taskEdits[taskId]; if (!value) return; setBusy(true); setError(""); try { onUpdated(await api.updateServiceRequestTask(token, request.id, taskId, { status: value.status, assignmentGroupId: value.assignmentGroupId || undefined, assignedToId: value.assignedToId || undefined })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update task"); } finally { setBusy(false); } }
   async function loadAttachments() { try { setAttachments(await api.attachments(token, request.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load attachments"); } }
   async function uploadAttachment(file?: File) { if(!file)return;setBusy(true);setError("");try{await api.uploadAttachment(token,request.id,file);await loadAttachments();}catch(reason){setError(reason instanceof Error?reason.message:"Could not upload attachment")}finally{setBusy(false)} }
   async function deleteAttachment(id:string) { setBusy(true);try{await api.deleteAttachment(token,request.id,id);await loadAttachments();}catch(reason){setError(reason instanceof Error?reason.message:"Could not delete attachment")}finally{setBusy(false)} }
@@ -1015,193 +988,30 @@ function ServiceRequestDetail({
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <section className="modal detail-modal">
-        <div className="modal-head">
-          <div>
-            <p className="eyebrow">{request.ticketNumber}</p>
-            <h2>{request.title}</h2>
-          </div>
-          <button type="button" className="icon-button" onClick={onClose}>×</button>
-        </div>
-        <div className="detail-meta">
-          <div>
-            <small>Status</small>
-            <span className={`badge ${request.status?.name.toLowerCase()}`}>{request.status?.name.replace("_", " ")}</span>
-          </div>
-          <div>
-            <small>Catalogue item</small>
-            <b>{request.serviceRequest?.catalogItem?.name || "Service request"}</b>
-          </div>
-          <div>
-            <small>Assignment group</small>
-            <b>{request.assignmentGroup?.name || "Unassigned"}</b>
-          </div>
-          <div>
-            <small>Requested by</small>
-            <b>{request.createdBy.name}</b>
-          </div>
-        </div>
-        <div className="detail-section request-description">
-          <h3>Description</h3>
-          <p>{request.description || "No description provided."}</p>
-        </div>
-        <div className="operations-grid">
-          <div>
-            <div className="detail-section">
-              <h3>Request details</h3>
-              {Object.keys(details).length === 0 ? <p className="muted">No extra details submitted.</p> : (
-                <dl>
-                  {Object.entries(details).map(([key, value]) => (
-                    <Fragment key={key}>
-                      <dt>{key}</dt>
-                      <dd>{String(value || "—")}</dd>
-                    </Fragment>
-                  ))}
-                </dl>
-              )}
-              <dl>
-                <dt>Created</dt>
-                <dd>{new Date(request.createdAt).toLocaleString()}</dd>
-              </dl>
-            </div>
-            {request.serviceRequest?.approvals && request.serviceRequest.approvals.length > 0 && (
-              <div className="detail-section">
-                <h3>Approvals</h3>
-                <div className="related-list">
-                  {request.serviceRequest.approvals.map((approval) => (
-                    <article key={approval.id}>
-                      <b>Step {approval.sequence}</b>
-                      <div>
-                        <strong>{approval.approvalType.replace("_", " ")}</strong>
-                        <small>{approval.approver?.name || "Approver pending"} · {approval.status}</small>
-                      </div>
-                      {approval.status === "PENDING" && (canEdit || approval.approver?.id === currentUserId) ? (
-                        <span>
-                          <button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "APPROVED")}>Approve</button>{" "}
-                          <button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "REJECTED")}>Reject</button>
-                        </span>
-                      ) : <span className={`badge ${approval.status.toLowerCase()}`}>{approval.status}</span>}
-                    </article>
-                  ))}
-                </div>
-              </div>
-            )}
-            {request.serviceRequest?.tasks && request.serviceRequest.tasks.length > 0 && (
-              <div className="detail-section">
-                <h3>Tasks</h3>
-                <div className="related-list">
-                  {request.serviceRequest.tasks.map((task) => {
-                    const edit = taskEdits[task.id] || { status: task.status, assignmentGroupId: task.assignmentGroup?.id || "", assignedToId: task.assignedTo?.id || "" };
-                    const taskGroup = groups.find((group) => group.id === edit.assignmentGroupId);
-                    return <article key={task.id}>
-                      <b>{task.taskNumber}</b>
-                      <div>
-                        <strong>{task.title}</strong>
-                        {task.description && <small>{task.description}</small>}
-                        <small>{task.assignmentGroup?.name || "No group"} · {task.assignedTo?.name || "Unassigned"}</small>
-                      </div>
-                      {canEdit ? (
-                        <div className="task-edit-row">
-                          <select value={edit.status} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, status: e.target.value } })}>
-                            <option value="OPEN">Open</option>
-                            <option value="IN_PROGRESS">In progress</option>
-                            <option value="COMPLETED">Completed</option>
-                            <option value="CANCELLED">Cancelled</option>
-                          </select>
-                          <select value={edit.assignmentGroupId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignmentGroupId: e.target.value, assignedToId: "" } })}>
-                            <option value="">No group</option>
-                            {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-                          </select>
-                          <select value={edit.assignedToId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignedToId: e.target.value } })}>
-                            <option value="">Unassigned</option>
-                            {taskGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}
-                          </select>
-                          <button className="secondary small" disabled={busy} onClick={() => updateTask(task.id)}>Save</button>
-                        </div>
-                      ) : <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>}
-                    </article>;
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-          <div>
-            {canEdit && (
-              <div className="detail-section">
-                <h3>Assignment</h3>
-                <div className="assignment-row stacked">
-                  <select value={groupId} onChange={(e) => { setGroupId(e.target.value); setAssigneeId(""); }}>
-                    <option value="">Select group</option>
-                    {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-                  </select>
-                  <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
-                    <option value="">Select assignee</option>
-                    {selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}
-                  </select>
-                  <button className="secondary" onClick={assign} disabled={!groupId || !assigneeId || busy}>Assign</button>
-                </div>
-              </div>
-            )}
-            {canEdit && (
-              <div className="detail-section">
-                <h3>Status</h3>
-                <div className="status-row">
-                  <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={request.status?.name === "CLOSED" && !canReopen}>
-                    {["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"].map((value) => (
-                      <option key={value} value={value}>{value.replaceAll("_", " ")}</option>
-                    ))}
-                  </select>
-                  <button className="secondary" onClick={updateStatus} disabled={busy || (request.status?.name === "CLOSED" && !canReopen)}>Update</button>
-                </div>
-                {request.status?.name === "CLOSED" && !canReopen && <p className="muted">Only an administrator can reopen a closed ticket.</p>}
-              </div>
-            )}
-            {request.slas?.length > 0 && (
-              <div className="detail-section">
-                <h3>SLA</h3>
-                {request.slas.map((sla) => (
-                  <div className="ticket-sla" key={sla.id}>
-                    <div>
-                      <b>{sla.definitionName}</b>
-                      <span className={`badge ${sla.status.toLowerCase()}`}>{sla.status.replace("_", " ")}</span>
-                    </div>
-                    <small>Response due {new Date(sla.responseDueAt).toLocaleString()}</small>
-                    <small>Resolution due {new Date(sla.resolutionDueAt).toLocaleString()}</small>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="detail-section">
-          <div className="record-tabs">
-            <button className={activeTab === "work-notes" ? "active" : ""} onClick={() => setActiveTab("work-notes")}>{canEdit ? "Work Notes" : "Comments"}</button>
-            {attachmentConfig?.enabled && <button className={activeTab === "attachments" ? "active" : ""} onClick={() => setActiveTab("attachments")}>Attachments <span>{attachments.length}</span></button>}
-          </div>
-          {activeTab === "work-notes" ? (
-            <>
-              <div className="note-entry">
-                <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note…" : "Add a comment…"} />
-                <button className="primary" onClick={addNote} disabled={!note.trim() || busy}>Add {canEdit ? "work note" : "comment"}</button>
-              </div>
-              <div className="activity-list">
-                {request.activities.length === 0 ? <p className="muted">No activity yet.</p> : request.activities.map((activity) => (
-                  <article key={activity.id}>
-                    <div>
-                      <b>{activity.createdBy.name}</b>
-                      <span className="activity-type">{activity.activityType?.name.replace("_", " ") || "ACTIVITY"}</span>
-                      <time>{new Date(activity.createdAt).toLocaleString()}</time>
-                    </div>
-                    <p>{activity.comment}</p>
-                  </article>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="attachment-panel"><label className="attachment-upload">Add attachment <small>Maximum {attachmentConfig?.maxFileSizeMb||10} MB</small><input type="file" disabled={busy} onChange={e=>{void uploadAttachment(e.target.files?.[0]);e.target.value=''}}/></label>{attachments.length===0?<p className="muted">No attachments yet.</p>:<div className="attachment-list">{attachments.map(item=><article key={item.id}><div><b>{item.fileName}</b><small>{(item.sizeBytes/1024).toFixed(1)} KB · {item.uploadedBy.name} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="secondary small" onClick={()=>api.downloadAttachment(token,request.id,item.id,item.fileName)}>Download</button><button className="icon-button danger" title="Delete attachment" onClick={()=>deleteAttachment(item.id)}>×</button></article>)}</div>}</div>
-          )}
+      <section className={`modal detail-modal record-form-modal ${fullscreen ? "fullscreen" : ""}`}>
+        <div className="modal-head record-head">
+          <div><p className="eyebrow">{request.ticketNumber}</p><h2>{request.title}</h2></div>
+          <div className="modal-head-actions"><button type="button" className="icon-button" title={fullscreen ? "Exit full screen" : "Full screen"} onClick={() => setFullscreen((value) => !value)}>{"\u2197"}</button><button type="button" className="icon-button" title="Close" onClick={onClose}>{"\u00d7"}</button></div>
         </div>
         {error && <div className="error">{error}</div>}
+        <div className="detail-section request-description"><h3>Description</h3><p>{request.description || "No description provided."}</p></div>
+        <div className="record-two-column">
+          <div className="record-main-stack">
+            <div className="detail-section compact-fields"><h3>Request information</h3><dl><dt>Created</dt><dd>{new Date(request.createdAt).toLocaleString()}</dd><dt>Status</dt><dd><span className={`badge ${(request.status?.name || "OPEN").toLowerCase()}`}>{(request.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Catalogue Item</dt><dd>{request.serviceRequest?.catalogItem?.name || "Service request"}</dd><dt>Requested By</dt><dd>{request.createdBy.name}</dd></dl></div>
+          </div>
+          <aside className="record-side-stack">
+            <div className="detail-section"><h3>Assignment</h3>{canEdit ? <div className="assignment-row stacked"><select value={groupId} onChange={(e) => { setGroupId(e.target.value); setAssigneeId(""); }}><option value="">Select group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select><button className="secondary" onClick={assign} disabled={!groupId || !assigneeId || busy}>Assign</button></div> : <dl><dt>Group</dt><dd>{request.assignmentGroup?.name || "Unassigned"}</dd><dt>Assignee</dt><dd>{request.assignedTo?.name || "Unassigned"}</dd></dl>}</div>
+            {canEdit && <div className="detail-section"><h3>Status</h3><div className="status-row"><select value={status} onChange={(e) => setStatus(e.target.value)} disabled={request.status?.name === "CLOSED" && !canReopen}>{["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"].map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select><button className="secondary" onClick={updateStatus} disabled={busy || (request.status?.name === "CLOSED" && !canReopen)}>Update</button></div>{request.status?.name === "CLOSED" && !canReopen && <p className="muted">Only an administrator can reopen a closed ticket.</p>}</div>}
+          </aside>
+        </div>
+        {request.slas?.length > 0 && <div className="detail-section"><h3>SLA</h3>{request.slas.map((sla) => <div className="ticket-sla" key={sla.id}><div><b>{sla.definitionName}</b><span className={`badge ${sla.status.toLowerCase()}`}>{sla.status.replace("_", " ")}</span></div><small>Response due {new Date(sla.responseDueAt).toLocaleString()}</small><small>Resolution due {new Date(sla.resolutionDueAt).toLocaleString()}</small></div>)}</div>}
+        <div className="detail-section record-tab-shell">
+          <div className="record-tabs"><button className={activeTab === "work-notes" ? "active" : ""} onClick={() => setActiveTab("work-notes")}>{canEdit ? "Work Notes" : "Comments"}</button><button className={activeTab === "approvals" ? "active" : ""} onClick={() => setActiveTab("approvals")}>Approvals <span>{approvals.length}</span></button><button className={activeTab === "tasks" ? "active" : ""} onClick={() => setActiveTab("tasks")}>Tasks <span>{tasks.length}</span></button>{attachmentConfig?.enabled && <button className={activeTab === "attachments" ? "active" : ""} onClick={() => setActiveTab("attachments")}>Attachments <span>{attachments.length}</span></button>}</div>
+          {activeTab === "work-notes" && <><div className="note-entry"><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."} /><button className="primary" onClick={addNote} disabled={!note.trim() || busy}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{request.activities.length === 0 ? <p className="muted">No activity yet.</p> : request.activities.map((activity) => <article key={activity.id}><div><b>{activity.createdBy.name}</b><span className="activity-type">{activity.activityType?.name.replace("_", " ") || "ACTIVITY"}</span><time>{new Date(activity.createdAt).toLocaleString()}</time></div><p>{activity.comment}</p></article>)}</div></>}
+          {activeTab === "approvals" && <div className="approval-step-list">{approvals.length === 0 ? <p className="muted">No approvals required for this request.</p> : approvals.map((approval) => <article key={approval.id}><b>Step {approval.sequence}</b><div><strong>{approval.approvalType.replace("_", " ")}</strong><small>{approval.approver?.name || "Approver pending"}</small></div>{approval.status === "PENDING" && (canEdit || approval.approver?.id === currentUserId) ? <span className="approval-actions"><button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "APPROVED")}>Approve</button><button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "REJECTED")}>Reject</button></span> : <span className={`badge ${approval.status.toLowerCase()}`}>{approval.status}</span>}</article>)}</div>}
+          {activeTab === "tasks" && <div className="related-list task-card-list">{tasks.length === 0 ? <p className="muted">No tasks created for this request.</p> : tasks.map((task) => { const edit = taskEdits[task.id] || { status: task.status, assignmentGroupId: task.assignmentGroup?.id || "", assignedToId: task.assignedTo?.id || "" }; const taskGroup = groups.find((group) => group.id === edit.assignmentGroupId); return <article key={task.id}><button className="link-button task-number-link" type="button">{task.taskNumber}</button><div><strong>{task.title}</strong>{task.description && <small>{task.description}</small>}<small>{task.assignmentGroup?.name || "No group"} - {task.assignedTo?.name || "Unassigned"}</small></div>{canEdit ? <div className="task-edit-row"><select value={edit.status} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, status: e.target.value } })}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={edit.assignmentGroupId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignmentGroupId: e.target.value, assignedToId: "" } })}><option value="">No group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select value={edit.assignedToId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignedToId: e.target.value } })}><option value="">Unassigned</option>{taskGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select><button className="secondary small" disabled={busy} onClick={() => updateTask(task.id)}>Save</button></div> : <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>}</article>; })}</div>}
+          {activeTab === "attachments" && <div className="attachment-panel"><label className="attachment-upload">Add attachment <small>Maximum {attachmentConfig?.maxFileSizeMb||10} MB</small><input type="file" disabled={busy} onChange={e=>{void uploadAttachment(e.target.files?.[0]);e.target.value=''}}/></label>{attachments.length===0?<p className="muted">No attachments yet.</p>:<div className="attachment-list">{attachments.map(item=><article key={item.id}><div><b>{item.fileName}</b><small>{(item.sizeBytes/1024).toFixed(1)} KB - {item.uploadedBy.name} - {new Date(item.createdAt).toLocaleString()}</small></div><button className="secondary small" onClick={()=>api.downloadAttachment(token,request.id,item.id,item.fileName)}>Download</button><button className="icon-button danger" title="Delete attachment" onClick={()=>deleteAttachment(item.id)}>{"\u00d7"}</button></article>)}</div>}</div>}
+        </div>
       </section>
     </div>
   );
@@ -1213,46 +1023,77 @@ function ProblemDetail({ problem, token, canEdit, canReopen, groups, onUpdated, 
   const [groupId, setGroupId] = useState(problem.assignmentGroup?.id || groups[0]?.id || "");
   const [assigneeId, setAssigneeId] = useState(problem.assignedTo?.id || "");
   const [note, setNote] = useState("");
+  const [activeTab, setActiveTab] = useState<"work-notes" | "tasks" | "related" | "risk">("work-notes");
   const [taskDraft, setTaskDraft] = useState({ title: "", description: "", assignmentGroupId: "", assignedToId: "" });
   const [taskEdits, setTaskEdits] = useState<Record<string, { status: string; assignmentGroupId: string; assignedToId: string }>>({});
+  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
+  const [relatedNumber, setRelatedNumber] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [fullscreen, setFullscreen] = useState(false);
   const selectedGroup = groups.find((group) => group.id === groupId);
-  async function save() { setBusy(true); setError(""); try { onUpdated(await api.updateProblem(token, problem.id, form)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem"); } finally { setBusy(false); } }
-  async function updateStatus() { setBusy(true); setError(""); try { onUpdated(await api.changeProblemStatus(token, problem.id, status)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update status"); } finally { setBusy(false); } }
-  async function assign() { if(!groupId||!assigneeId)return; setBusy(true); setError(""); try { onUpdated(await api.assignProblem(token, problem.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
+  const activities = [...problem.activities].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const tasks = problem.problem?.tasks || [];
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) || tasks[0];
+  const fieldValue = (value?: string | null) => value?.trim() || "Not documented";
+  async function save() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateProblem(token, problem.id, form)); setSuccess("Problem details updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem"); } finally { setBusy(false); } }
+  async function updateStatus() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.changeProblemStatus(token, problem.id, status)); setSuccess("Status updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update status"); } finally { setBusy(false); } }
+  async function assign() { if(!groupId||!assigneeId)return; setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.assignProblem(token, problem.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); setSuccess("Assignment updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
   async function addNote() { if(!note.trim())return; setBusy(true); setError(""); try { await api.addProblemActivity(token, problem.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.problems(token); const value = refreshed.find((item)=>item.id===problem.id); if(value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
-  async function createTask() { if(!taskDraft.title.trim())return; setBusy(true); setError(""); try { onUpdated(await api.createProblemTask(token, problem.id, { ...taskDraft, assignmentGroupId: taskDraft.assignmentGroupId || undefined, assignedToId: taskDraft.assignedToId || undefined })); setTaskDraft({ title: "", description: "", assignmentGroupId: "", assignedToId: "" }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create problem task"); } finally { setBusy(false); } }
-  async function updateTask(taskId: string) { const value = taskEdits[taskId]; if(!value)return; setBusy(true); setError(""); try { onUpdated(await api.updateProblemTask(token, problem.id, taskId, { status: value.status, assignmentGroupId: value.assignmentGroupId || undefined, assignedToId: value.assignedToId || undefined })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem task"); } finally { setBusy(false); } }
-  return <div className="modal-backdrop" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><section className="modal detail-modal">
-    <div className="modal-head"><div><p className="eyebrow">{problem.ticketNumber}</p><h2>{problem.title}</h2></div><button type="button" className="icon-button" onClick={onClose}>×</button></div>
-    {error&&<div className="error">{error}</div>}
-    <div className="operations-grid"><div>
-      <div className="detail-section"><h3>Problem details</h3>
-        {canEdit ? <>
-          <label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
-          <label>Description<textarea rows={3} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
-          <label>Priority<select value={form.priority} onChange={(e)=>setForm({...form,priority:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
-          <label>Root cause<textarea rows={3} value={form.rootCause} onChange={(e)=>setForm({...form,rootCause:e.target.value})}/></label>
-          <label>Workaround<textarea rows={3} value={form.workaround} onChange={(e)=>setForm({...form,workaround:e.target.value})}/></label>
-          <label>Permanent fix<textarea rows={3} value={form.permanentFix} onChange={(e)=>setForm({...form,permanentFix:e.target.value})}/></label>
-          <label className="check-row"><input type="checkbox" checked={form.knownError} onChange={(e)=>setForm({...form,knownError:e.target.checked})}/>Known error</label>
-          <button className="primary" disabled={busy} onClick={save}>Save problem</button>
-        </> : <>
-          <p>{problem.description || "No description provided."}</p>
-          <dl><dt>Root cause</dt><dd>{problem.problem?.rootCause || "Not documented"}</dd><dt>Workaround</dt><dd>{problem.problem?.workaround || "Not documented"}</dd><dt>Permanent fix</dt><dd>{problem.problem?.permanentFix || "Not documented"}</dd></dl>
-        </>}
-      </div>
-      <div className="detail-section"><h3>PTasks</h3>
-        {canEdit&&<div className="admin-helper-grid"><input placeholder="Task title" value={taskDraft.title} onChange={(e)=>setTaskDraft({...taskDraft,title:e.target.value})}/><input placeholder="Task description" value={taskDraft.description} onChange={(e)=>setTaskDraft({...taskDraft,description:e.target.value})}/><select value={taskDraft.assignmentGroupId} onChange={(e)=>setTaskDraft({...taskDraft,assignmentGroupId:e.target.value,assignedToId:""})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><button className="secondary small" onClick={createTask} disabled={busy}>Open PTask</button></div>}
-        <div className="related-list">{problem.problem?.tasks?.length ? problem.problem.tasks.map((task)=>{ const edit=taskEdits[task.id]||{status:task.status,assignmentGroupId:task.assignmentGroup?.id||"",assignedToId:task.assignedTo?.id||""}; const taskGroup=groups.find((g)=>g.id===edit.assignmentGroupId); return <article key={task.id}><b>{task.taskNumber}</b><div><strong>{task.title}</strong>{task.description&&<small>{task.description}</small>}<small>{task.assignmentGroup?.name||"No group"} · {task.assignedTo?.name||"Unassigned"}</small></div>{canEdit?<div className="task-edit-row"><select value={edit.status} onChange={(e)=>setTaskEdits({...taskEdits,[task.id]:{...edit,status:e.target.value}})}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={edit.assignmentGroupId} onChange={(e)=>setTaskEdits({...taskEdits,[task.id]:{...edit,assignmentGroupId:e.target.value,assignedToId:""}})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={edit.assignedToId} onChange={(e)=>setTaskEdits({...taskEdits,[task.id]:{...edit,assignedToId:e.target.value}})}><option value="">Unassigned</option>{taskGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary small" onClick={()=>updateTask(task.id)} disabled={busy}>Save</button></div>:<span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>}</article>}) : <p className="muted">No PTasks opened yet.</p>}</div>
-      </div>
-    </div><div>
-      {canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}
-      {canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="AWAITING_CUSTOMER">Awaiting customer</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{problem.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an administrator can reopen a closed problem.</p>}</div>}
-      <div className="detail-section"><h3>{canEdit ? "Add work note" : "Add comment"}</h3><textarea rows={4} value={note} onChange={(e)=>setNote(e.target.value)}/><button className="secondary" disabled={!note.trim()||busy} onClick={addNote}>Save note</button></div>
-      <div className="detail-section"><h3>Activity</h3><div className="activity-list">{problem.activities.map((a)=><article key={a.id}><b>{a.createdBy.name}</b><span>{a.activityType?.name||"ACTIVITY"} · {new Date(a.createdAt).toLocaleString()}</span><p>{a.comment}</p></article>)}</div></div>
-    </div></div>
+  async function createTask() { if(!taskDraft.title.trim())return; setBusy(true); setError(""); setSuccess(""); try { const updated = await api.createProblemTask(token, problem.id, { ...taskDraft, assignmentGroupId: taskDraft.assignmentGroupId || undefined, assignedToId: taskDraft.assignedToId || undefined }); onUpdated(updated); setSelectedTaskId(updated.problem?.tasks?.at(-1)?.id || ""); setTaskDraft({ title: "", description: "", assignmentGroupId: "", assignedToId: "" }); setSuccess("PTask opened."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create problem task"); } finally { setBusy(false); } }
+  async function updateTask(taskId: string) { const value = taskEdits[taskId]; if(!value)return; setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateProblemTask(token, problem.id, taskId, { status: value.status, assignmentGroupId: value.assignmentGroupId || undefined, assignedToId: value.assignedToId || undefined })); setSuccess("PTask updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem task"); } finally { setBusy(false); } }
+  async function loadRelated() { try { setRelatedItems(await api.relatedItems(token, problem.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load related incidents"); } }
+  async function addRelated() { if(!relatedNumber.trim())return; setBusy(true); setError(""); setSuccess(""); try { await api.addRelatedItem(token, problem.id, { relatedTicketNumber: relatedNumber, relationshipType: "CHILD_INCIDENT" }); setRelatedNumber(""); await loadRelated(); setSuccess("Related incident linked."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not link related incident"); } finally { setBusy(false); } }
+  useEffect(() => { if(activeTab === "related") void loadRelated(); }, [activeTab, problem.id]);
+  useEffect(() => { if(!selectedTaskId && tasks.length) setSelectedTaskId(tasks[0].id); }, [problem.id, tasks.length]);
+  return <div className="modal-backdrop" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><section className={`modal detail-modal record-form-modal ${fullscreen ? "fullscreen" : ""}`}>
+    <div className="modal-head record-head"><div><p className="eyebrow">{problem.ticketNumber}</p><h2>{problem.title}</h2><p className="muted">{problem.title}</p></div><div className="modal-head-actions"><button type="button" className="icon-button" title={fullscreen ? "Exit full screen" : "Full screen"} onClick={() => setFullscreen((value) => !value)}>{"\u2197"}</button><button type="button" className="icon-button" title="Close" onClick={onClose}>{"\u00d7"}</button></div></div>
+    {success&&<div className="success">{success}</div>}{error&&<div className="error">{error}</div>}
+    <div className="record-two-column">
+      <div className="record-main-stack"><div className="detail-section problem-form-fields"><h3>Problem details</h3>{canEdit ? <><label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea rows={4} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label><label>Impact<textarea rows={3} disabled placeholder="Impact field will be added with PRB risk fields."/></label><label>Root Cause<textarea rows={4} value={form.rootCause} onChange={(e)=>setForm({...form,rootCause:e.target.value})}/></label><label>Workaround<textarea rows={3} value={form.workaround} onChange={(e)=>setForm({...form,workaround:e.target.value})}/></label><label>Permanent Fix<textarea rows={4} value={form.permanentFix} onChange={(e)=>setForm({...form,permanentFix:e.target.value})}/></label><label className="check-row"><input type="checkbox" checked={form.knownError} onChange={(e)=>setForm({...form,knownError:e.target.checked})}/>Risk accepted</label><button className="primary" disabled={busy} onClick={save}>Save problem</button></> : <dl className="compact-fields"><dt>Description</dt><dd>{fieldValue(problem.description)}</dd><dt>Impact</dt><dd>Not documented</dd><dt>Root Cause</dt><dd>{fieldValue(problem.problem?.rootCause)}</dd><dt>Workaround</dt><dd>{fieldValue(problem.problem?.workaround)}</dd><dt>Permanent Fix</dt><dd>{fieldValue(problem.problem?.permanentFix)}</dd><dt>Risk Accepted</dt><dd>{problem.problem?.knownError ? "Yes" : "No"}</dd></dl>}</div></div>
+      <aside className="record-side-stack"><div className="detail-section compact-fields"><h3>Record info</h3><dl><dt>Created By</dt><dd>{problem.createdBy.name}</dd><dt>Opened On</dt><dd>{new Date(problem.createdAt).toLocaleString()}</dd><dt>Priority</dt><dd>{problem.priority?.name || form.priority}</dd><dt>Status</dt><dd><span className={`badge ${(problem.status?.name || "OPEN").toLowerCase()}`}>{(problem.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Problem Type</dt><dd>Reactive</dd><dt>Configuration Item</dt><dd>Not linked</dd></dl></div>{canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}{canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="AWAITING_CUSTOMER">Awaiting customer</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{problem.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an administrator can reopen a closed problem.</p>}</div>}</aside>
+    </div>
+    <div className="detail-section record-tab-shell"><div className="record-tabs"><button className={activeTab==="work-notes"?"active":""} onClick={()=>setActiveTab("work-notes")}>Work Notes</button><button className={activeTab==="tasks"?"active":""} onClick={()=>setActiveTab("tasks")}>Problem Tasks <span>{tasks.length}</span></button><button className={activeTab==="related"?"active":""} onClick={()=>setActiveTab("related")}>Related Incidents <span>{relatedItems.length}</span></button><button className={activeTab==="risk"?"active":""} onClick={()=>setActiveTab("risk")}>Risk</button></div>
+      {activeTab==="work-notes"&&<><div className="note-entry"><textarea rows={3} value={note} onChange={(e)=>setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."}/><button className="primary" disabled={!note.trim()||busy} onClick={addNote}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{activities.length ? activities.map((a)=><article key={a.id}><div><b>{a.createdBy.name}</b><span className="activity-type">{a.activityType?.name?.replace("_", " ")||"ACTIVITY"}</span><time>{new Date(a.createdAt).toLocaleString()}</time></div><p>{a.comment}</p></article>) : <p className="muted">No activity yet.</p>}</div></>}
+      {activeTab==="tasks"&&<div className="problem-task-workspace">{canEdit&&<div className="admin-helper-grid"><input placeholder="Task title" value={taskDraft.title} onChange={(e)=>setTaskDraft({...taskDraft,title:e.target.value})}/><input placeholder="Task description" value={taskDraft.description} onChange={(e)=>setTaskDraft({...taskDraft,description:e.target.value})}/><select value={taskDraft.assignmentGroupId} onChange={(e)=>setTaskDraft({...taskDraft,assignmentGroupId:e.target.value,assignedToId:""})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><button className="secondary small" onClick={createTask} disabled={busy}>Open PTask</button></div>}{tasks.length ? <div className="problem-task-layout"><div className="problem-task-list">{tasks.map((task)=><button key={task.id} className={`problem-task-card ${selectedTask?.id===task.id?"active":""}`} type="button" onClick={()=>setSelectedTaskId(task.id)}><strong>{task.taskNumber}</strong><span>{task.title}</span><small>{task.status.replaceAll("_", " ")}</small></button>)}</div>{selectedTask&&(()=>{ const edit=taskEdits[selectedTask.id]||{status:selectedTask.status,assignmentGroupId:selectedTask.assignmentGroup?.id||"",assignedToId:selectedTask.assignedTo?.id||""}; const taskGroup=groups.find((g)=>g.id===edit.assignmentGroupId); return <div className="problem-task-detail"><div className="task-detail-head"><div><p className="eyebrow">{selectedTask.taskNumber}</p><h3>{selectedTask.title}</h3></div><span className={`badge ${selectedTask.status.toLowerCase()}`}>{selectedTask.status.replaceAll("_", " ")}</span></div>{selectedTask.description&&<p>{selectedTask.description}</p>}<dl className="compact-fields"><dt>Assignment Group</dt><dd>{selectedTask.assignmentGroup?.name||"No group"}</dd><dt>Assigned To</dt><dd>{selectedTask.assignedTo?.name||"Unassigned"}</dd><dt>Created</dt><dd>{new Date(selectedTask.createdAt).toLocaleString()}</dd></dl>{canEdit&&<div className="task-edit-row"><select value={edit.status} onChange={(e)=>setTaskEdits({...taskEdits,[selectedTask.id]:{...edit,status:e.target.value}})}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={edit.assignmentGroupId} onChange={(e)=>setTaskEdits({...taskEdits,[selectedTask.id]:{...edit,assignmentGroupId:e.target.value,assignedToId:""}})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={edit.assignedToId} onChange={(e)=>setTaskEdits({...taskEdits,[selectedTask.id]:{...edit,assignedToId:e.target.value}})}><option value="">Unassigned</option>{taskGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary small" onClick={()=>updateTask(selectedTask.id)} disabled={busy}>Save PTask</button></div>}</div>; })()}</div> : <p className="muted">No PTasks opened yet.</p>}</div>}
+      {activeTab==="related"&&<div className="related-panel">{canEdit&&<div className="related-entry"><input value={relatedNumber} onChange={(e)=>setRelatedNumber(e.target.value)} placeholder="Incident number, e.g. INC000001"/><button className="secondary" onClick={addRelated} disabled={!relatedNumber.trim()||busy}>Link child incident</button></div>}{relatedItems.length===0?<p className="muted">No related incidents linked.</p>:<div className="related-list">{relatedItems.filter((item)=>item.relationshipType==="CHILD_INCIDENT").map((item)=><article key={item.id}><button className="link-button task-number-link" type="button">{item.ticketNumber}</button><span>{item.title}</span><span className="badge">{item.status}</span><small>{new Date(item.createdAt).toLocaleString()}</small></article>)}</div>}</div>}
+      {activeTab==="risk"&&<div className="risk-summary"><p className="muted">Risk Owner, Risk Accepted Till, and Risk Acceptance Summary will become editable after PRB risk fields are added to the database.</p></div>}
+    </div>
+  </section></div>;
+}
+
+function ChangeDetail({ change, token, canEdit, canReopen, groups, onUpdated, onClose }: { change: Incident; token: string; canEdit: boolean; canReopen: boolean; groups: AssignmentGroup[]; onUpdated: (value: Incident) => void; onClose: () => void }) {
+  const [form, setForm] = useState({ title: change.title, description: change.description || "", priority: change.priority?.name || "MEDIUM", changeType: change.change?.changeType || "NORMAL", risk: change.change?.risk || "MEDIUM", impact: change.change?.impact || "MEDIUM", plannedStart: change.change?.plannedStart?.slice(0, 16) || "", plannedEnd: change.change?.plannedEnd?.slice(0, 16) || "", implementationPlan: change.change?.implementationPlan || "", backoutPlan: change.change?.backoutPlan || "", testPlan: change.change?.testPlan || "" });
+  const [status, setStatus] = useState(change.status?.name || "OPEN");
+  const [groupId, setGroupId] = useState(change.assignmentGroup?.id || groups[0]?.id || "");
+  const [assigneeId, setAssigneeId] = useState(change.assignedTo?.id || "");
+  const [note, setNote] = useState("");
+  const [activeTab, setActiveTab] = useState<"work-notes" | "related" | "plans">("work-notes");
+  const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
+  const [relatedNumber, setRelatedNumber] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [fullscreen, setFullscreen] = useState(false);
+  const selectedGroup = groups.find((group) => group.id === groupId);
+  const activities = [...change.activities].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  async function save() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateChange(token, change.id, { ...form, plannedStart: form.plannedStart || undefined, plannedEnd: form.plannedEnd || undefined })); setSuccess("Change details updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update change"); } finally { setBusy(false); } }
+  async function updateStatus() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.changeChangeStatus(token, change.id, status)); setSuccess("Status updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update status"); } finally { setBusy(false); } }
+  async function assign() { if(!groupId||!assigneeId)return; setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.assignChange(token, change.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); setSuccess("Assignment updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
+  async function addNote() { if(!note.trim())return; setBusy(true); setError(""); try { await api.addChangeActivity(token, change.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.changes(token); const value = refreshed.find((item)=>item.id===change.id); if(value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
+  async function loadRelated() { try { setRelatedItems(await api.relatedItems(token, change.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load related items"); } }
+  async function addRelated() { if(!relatedNumber.trim())return; setBusy(true); setError(""); setSuccess(""); try { await api.addRelatedItem(token, change.id, { relatedTicketNumber: relatedNumber, relationshipType: "RELATED_CHANGE" }); setRelatedNumber(""); await loadRelated(); setSuccess("Related item linked."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not link related item"); } finally { setBusy(false); } }
+  useEffect(() => { if(activeTab === "related") void loadRelated(); }, [activeTab, change.id]);
+  return <div className="modal-backdrop" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><section className={`modal detail-modal record-form-modal ${fullscreen ? "fullscreen" : ""}`}>
+    <div className="modal-head record-head"><div><p className="eyebrow">{change.ticketNumber}</p><h2>{change.title}</h2><p className="muted">{change.change?.changeType || "NORMAL"} change</p></div><div className="modal-head-actions"><button type="button" className="icon-button" title={fullscreen ? "Exit full screen" : "Full screen"} onClick={() => setFullscreen((value) => !value)}>{"\u2197"}</button><button type="button" className="icon-button" title="Close" onClick={onClose}>{"\u00d7"}</button></div></div>
+    {success&&<div className="success">{success}</div>}{error&&<div className="error">{error}</div>}
+    <div className="record-two-column">
+      <div className="record-main-stack"><div className="detail-section problem-form-fields"><h3>Change details</h3>{canEdit ? <><label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea rows={4} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label><div className="form-grid"><label>Type<select value={form.changeType} onChange={(e)=>setForm({...form,changeType:e.target.value})}>{["STANDARD","NORMAL","EMERGENCY"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Risk<select value={form.risk} onChange={(e)=>setForm({...form,risk:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Impact<select value={form.impact} onChange={(e)=>setForm({...form,impact:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Priority<select value={form.priority} onChange={(e)=>setForm({...form,priority:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Planned start<input type="datetime-local" value={form.plannedStart} onChange={(e)=>setForm({...form,plannedStart:e.target.value})}/></label><label>Planned end<input type="datetime-local" value={form.plannedEnd} onChange={(e)=>setForm({...form,plannedEnd:e.target.value})}/></label></div><button className="primary" disabled={busy} onClick={save}>Save change</button></> : <p>{change.description || "No description provided."}</p>}</div></div>
+      <aside className="record-side-stack"><div className="detail-section compact-fields"><h3>Record info</h3><dl><dt>Requested By</dt><dd>{change.change?.requestedBy?.name || change.createdBy.name}</dd><dt>Opened On</dt><dd>{new Date(change.createdAt).toLocaleString()}</dd><dt>Priority</dt><dd>{change.priority?.name || form.priority}</dd><dt>Status</dt><dd><span className={`badge ${(change.status?.name || "OPEN").toLowerCase()}`}>{(change.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Risk</dt><dd>{change.change?.risk || form.risk}</dd><dt>Impact</dt><dd>{change.change?.impact || form.impact}</dd></dl></div>{canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}{canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="AWAITING_CUSTOMER">Awaiting customer</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{change.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an administrator can reopen a closed change.</p>}</div>}</aside>
+    </div>
+    <div className="detail-section record-tab-shell"><div className="record-tabs"><button className={activeTab==="work-notes"?"active":""} onClick={()=>setActiveTab("work-notes")}>Work Notes</button><button className={activeTab==="plans"?"active":""} onClick={()=>setActiveTab("plans")}>Plans</button><button className={activeTab==="related"?"active":""} onClick={()=>setActiveTab("related")}>Related Items <span>{relatedItems.length}</span></button></div>{activeTab==="work-notes"&&<><div className="note-entry"><textarea rows={3} value={note} onChange={(e)=>setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."}/><button className="primary" disabled={!note.trim()||busy} onClick={addNote}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{activities.length ? activities.map((a)=><article key={a.id}><div><b>{a.createdBy.name}</b><span className="activity-type">{a.activityType?.name?.replace("_", " ")||"ACTIVITY"}</span><time>{new Date(a.createdAt).toLocaleString()}</time></div><p>{a.comment}</p></article>) : <p className="muted">No activity yet.</p>}</div></>}{activeTab==="plans"&&<div className="change-plan-grid">{["implementationPlan","backoutPlan","testPlan"].map((key)=><label key={key}>{key==="implementationPlan"?"Implementation plan":key==="backoutPlan"?"Backout plan":"Test plan"}<textarea rows={4} disabled={!canEdit} value={form[key as "implementationPlan"|"backoutPlan"|"testPlan"]} onChange={(e)=>setForm({...form,[key]:e.target.value})}/></label>)}{canEdit&&<button className="primary" disabled={busy} onClick={save}>Save plans</button>}</div>}{activeTab==="related"&&<div className="related-panel">{canEdit&&<div className="related-entry"><input value={relatedNumber} onChange={(e)=>setRelatedNumber(e.target.value)} placeholder="Ticket number, e.g. INC000001 or PRB000001"/><button className="secondary" onClick={addRelated} disabled={!relatedNumber.trim()||busy}>Link item</button></div>}{relatedItems.length===0?<p className="muted">No related items linked.</p>:<div className="related-list">{relatedItems.map((item)=><article key={item.id}><button className="link-button task-number-link" type="button">{item.ticketNumber}</button><span>{item.title}</span><span className="badge">{item.status}</span><small>{item.relationshipType.replaceAll("_"," ")}</small></article>)}</div>}</div>}</div>
   </section></div>;
 }
 
@@ -1698,19 +1539,23 @@ function AdminConsole({
 function Dashboard({ session, onLogout, branding, themePreference, onThemePreferenceChange }: { session: Session; onLogout: () => void; branding: Branding; themePreference: ThemePreference; onThemePreferenceChange: (value: ThemePreference) => void }) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [serviceRequests, setServiceRequests] = useState<Incident[]>([]);
+  const [approvalRequests, setApprovalRequests] = useState<Incident[]>([]);
   const [problems, setProblems] = useState<Incident[]>([]);
+  const [changes, setChanges] = useState<Incident[]>([]);
   const [catalog, setCatalog] = useState<ServiceCatalogCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [creatingProblem, setCreatingProblem] = useState(false);
+  const [creatingChange, setCreatingChange] = useState(false);
   const [selected, setSelected] = useState<Incident | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<Incident | null>(null);
   const [selectedProblem, setSelectedProblem] = useState<Incident | null>(null);
-  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS" | "PROBLEMS">(() => {
+  const [selectedChange, setSelectedChange] = useState<Incident | null>(null);
+  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS" | "APPROVALS" | "PROBLEMS" | "CHANGES">(() => {
     const saved = localStorage.getItem(modulePreferenceKey);
-    return saved === "REQUESTS" || saved === "PROBLEMS" ? saved : "INCIDENTS";
+    return saved === "REQUESTS" || saved === "APPROVALS" || saved === "PROBLEMS" || saved === "CHANGES" ? saved : "INCIDENTS";
   });
   const canOperate = session.user.roles.some((role) =>
     ["IT_AGENT", "IT_SERVICE_MANAGER", "ADMIN"].includes(role),
@@ -1722,19 +1567,22 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [adminOpen, setAdminOpen] = useState(false);
   const [analyticsOpen,setAnalyticsOpen]=useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
   useEffect(() => {
     setLoading(true);
     Promise.all([
       api.incidents(session.accessToken),
       api.serviceRequests(session.accessToken),
+      api.pendingServiceApprovals(session.accessToken),
       api.problems(session.accessToken),
+      api.changes(session.accessToken),
       api.serviceCatalog(session.accessToken),
     ])
-      .then(([incidentValues, requestValues, problemValues, catalogValues]) => {
+      .then(([incidentValues, requestValues, approvalValues, problemValues, changeValues, catalogValues]) => {
         setIncidents(incidentValues);
         setServiceRequests(requestValues);
+        setApprovalRequests(approvalValues);
         setProblems(problemValues);
+        setChanges(changeValues);
         setCatalog(catalogValues);
       })
       .catch((e) => setError(e.message))
@@ -1821,6 +1669,46 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
       }),
     [problems, search, statusFilter],
   );
+  const visibleChanges = useMemo(
+    () =>
+      changes.filter((change) => {
+        const term = search.toLowerCase();
+        const matchesText =
+          !term ||
+          change.ticketNumber.toLowerCase().includes(term) ||
+          change.title.toLowerCase().includes(term) ||
+          change.change?.changeType?.toLowerCase().includes(term);
+        const matchesStatus =
+          statusFilter === "ALL" || change.status?.name === statusFilter;
+        return matchesText && matchesStatus;
+      }),
+    [changes, search, statusFilter],
+  );
+  const changeStats = useMemo(
+    () => ({
+      open: changes.filter((i) => !["RESOLVED", "CLOSED"].includes(i.status?.name || "")).length,
+      inProgress: changes.filter((i) => i.status?.name === "IN_PROGRESS").length,
+      highRisk: changes.filter((i) => ["HIGH", "CRITICAL"].includes(i.change?.risk || "")).length,
+      total: changes.length,
+    }),
+    [changes],
+  );
+  const visibleApprovalRequests = useMemo(
+    () =>
+      approvalRequests.filter((request) => {
+        const term = search.toLowerCase();
+        const matchesText =
+          !term ||
+          request.ticketNumber.toLowerCase().includes(term) ||
+          request.title.toLowerCase().includes(term) ||
+          request.serviceRequest?.catalogItem?.name.toLowerCase().includes(term);
+        const matchesStatus =
+          statusFilter === "ALL" || request.status?.name === statusFilter;
+        return matchesText && matchesStatus;
+      }),
+    [approvalRequests, search, statusFilter],
+  );
+  const queueItems = activeModule === "REQUESTS" ? visibleServiceRequests : activeModule === "APPROVALS" ? visibleApprovalRequests : activeModule === "PROBLEMS" ? visibleProblems : activeModule === "CHANGES" ? visibleChanges : visibleIncidents;
   return (
     <div className="app-shell">
       <aside>
@@ -1831,6 +1719,9 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           </a>
           <a className={activeModule === "REQUESTS" ? "active" : ""} onClick={() => setActiveModule("REQUESTS")}>
             ⌁ <span>Service requests</span>
+          </a>
+          <a className={activeModule === "APPROVALS" ? "active" : ""} onClick={() => setActiveModule("APPROVALS")}>
+            ↗ <span>Approvals</span>
           </a>
           <a className={activeModule === "PROBLEMS" ? "active" : ""} onClick={() => setActiveModule("PROBLEMS")}>
             ◇ <span>Problems</span>
@@ -1851,36 +1742,14 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           )}
           {!isEmployee&&<a className="admin-link" onClick={()=>setAnalyticsOpen(true)}>▥ <span>Analytics Console</span></a>}
         </nav>
-        <div className="user-block">
-          <button className="avatar user-menu-trigger" title="User menu" onClick={() => setUserMenuOpen((value) => !value)}>
+        <div className="user-block simple-user-block">
+          <div className="avatar">
             {session.user.name.slice(0, 2).toUpperCase()}
-          </button>
-          <div>
-            <button className="user-name-button" onClick={() => setUserMenuOpen((value) => !value)}>{session.user.name}</button>
-            <small>
-              {session.user.roles
-                .filter((role) => role !== "EMPLOYEE")
-                .join(", ") || "EMPLOYEE"}
-            </small>
           </div>
-          <button title="Sign out" onClick={onLogout}>
-            ↗
-          </button>
-          {userMenuOpen && (
-            <div className="user-menu">
-              <label>
-                Theme
-                <select
-                  value={themePreference}
-                  onChange={(event) => onThemePreferenceChange(event.target.value as ThemePreference)}
-                >
-                  <option value="DARK">Nextris Dark</option>
-                  <option value="LIGHT">Light</option>
-                  <option value="SYSTEM">Use device setting</option>
-                </select>
-              </label>
-            </div>
-          )}
+          <div>
+            <strong>{session.user.name}</strong>
+            <button className="sign-out-link" title="Sign out" onClick={onLogout}>Sign out</button>
+          </div>
         </div>
       </aside>
       <main className="workspace">
@@ -1889,48 +1758,52 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
             <p className="eyebrow">
               {isEmployee ? "EMPLOYEE SUPPORT" : "SERVICE OPERATIONS"}
             </p>
-            <h1>{activeModule === "REQUESTS" ? (isEmployee ? "My service requests" : "Service requests") : activeModule === "PROBLEMS" ? "Problems" : (isEmployee ? "My incidents" : "Incidents")}</h1>
+            <h1>{activeModule === "REQUESTS" ? (isEmployee ? "My service requests" : "Service requests") : activeModule === "APPROVALS" ? "My approvals" : activeModule === "PROBLEMS" ? "Problems" : activeModule === "CHANGES" ? "Changes" : (isEmployee ? "My incidents" : "Incidents")}</h1>
             <p>
               {activeModule === "REQUESTS"
                 ? "Browse catalogue requests and track fulfilment."
+                : activeModule === "APPROVALS"
+                ? "Review service requests waiting for your decision."
                 : activeModule === "PROBLEMS"
                 ? "Investigate recurring issues, document root cause, and coordinate PTasks."
+                : activeModule === "CHANGES"
+                ? "Plan, assess, and coordinate controlled changes."
                 : isEmployee
                 ? "Report issues and follow their progress."
                 : "Track interruptions and restore service quickly."}
             </p>
           </div>
-          <button className="primary compact" onClick={() => activeModule === "REQUESTS" ? setCreatingRequest(true) : activeModule === "PROBLEMS" ? setCreatingProblem(true) : setCreating(true)}>
+          <button className="primary compact" onClick={() => activeModule === "REQUESTS" ? setCreatingRequest(true) : activeModule === "PROBLEMS" ? setCreatingProblem(true) : activeModule === "CHANGES" ? setCreatingChange(true) : setCreating(true)}>
             {activeModule === "REQUESTS" ? "＋ New request" : activeModule === "PROBLEMS" ? "＋ New problem" : "＋ New incident"}
           </button>
         </header>
         <section className="stats">
           <article>
             <span>Open</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.open : activeModule === "PROBLEMS" ? problemStats.open : stats.open}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.open : activeModule === "APPROVALS" ? approvalRequests.length : activeModule === "PROBLEMS" ? problemStats.open : activeModule === "CHANGES" ? changeStats.open : stats.open}</strong>
             <small>Awaiting action</small>
           </article>
           <article>
             <span>In progress</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.inProgress : activeModule === "PROBLEMS" ? problemStats.inProgress : stats.active}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.inProgress : activeModule === "APPROVALS" ? approvalRequests.filter((i) => i.status?.name === "AWAITING_APPROVAL").length : activeModule === "PROBLEMS" ? problemStats.inProgress : activeModule === "CHANGES" ? changeStats.inProgress : stats.active}</strong>
             <small>Work underway</small>
           </article>
           <article>
-            <span>{activeModule === "REQUESTS" ? "Catalogue items" : activeModule === "PROBLEMS" ? "Known errors" : "Critical"}</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.catalogItems : activeModule === "PROBLEMS" ? problemStats.knownErrors : stats.critical}</strong>
-            <small>{activeModule === "REQUESTS" ? "Available request types" : activeModule === "PROBLEMS" ? "Documented known errors" : "Highest priority"}</small>
+            <span>{activeModule === "REQUESTS" ? "Catalogue items" : activeModule === "APPROVALS" ? "Pending" : activeModule === "PROBLEMS" ? "Known errors" : activeModule === "CHANGES" ? "High risk" : "Critical"}</span>
+            <strong>{activeModule === "REQUESTS" ? requestStats.catalogItems : activeModule === "APPROVALS" ? approvalRequests.length : activeModule === "PROBLEMS" ? problemStats.knownErrors : activeModule === "CHANGES" ? changeStats.highRisk : stats.critical}</strong>
+            <small>{activeModule === "REQUESTS" ? "Available request types" : activeModule === "APPROVALS" ? "Decisions assigned to you" : activeModule === "PROBLEMS" ? "Documented known errors" : activeModule === "CHANGES" ? "High or critical risk" : "Highest priority"}</small>
           </article>
           <article>
             <span>Total</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.total : activeModule === "PROBLEMS" ? problemStats.total : incidents.length}</strong>
-            <small>{activeModule === "REQUESTS" ? "All requests" : activeModule === "PROBLEMS" ? "All problems" : "All incidents"}</small>
+            <strong>{activeModule === "REQUESTS" ? requestStats.total : activeModule === "APPROVALS" ? approvalRequests.length : activeModule === "PROBLEMS" ? problemStats.total : activeModule === "CHANGES" ? changeStats.total : incidents.length}</strong>
+            <small>{activeModule === "REQUESTS" ? "All requests" : activeModule === "APPROVALS" ? "Awaiting you" : activeModule === "PROBLEMS" ? "All problems" : activeModule === "CHANGES" ? "All changes" : "All incidents"}</small>
           </article>
         </section>
         <section className="table-card">
           <div className="table-head">
             <div>
-              <h2>{activeModule === "REQUESTS" ? "Request queue" : activeModule === "PROBLEMS" ? "Problem queue" : "Incident queue"}</h2>
-              <p>{activeModule === "REQUESTS" ? "Service requests for your scope" : activeModule === "PROBLEMS" ? "Problems for investigation and root cause tracking" : "All incidents in your organization"}</p>
+              <h2>{activeModule === "REQUESTS" ? "Request queue" : activeModule === "APPROVALS" ? "Approval queue" : activeModule === "PROBLEMS" ? "Problem queue" : activeModule === "CHANGES" ? "Change queue" : "Incident queue"}</h2>
+              <p>{activeModule === "REQUESTS" ? "Service requests for your scope" : activeModule === "APPROVALS" ? "Service requests assigned to you for approval" : activeModule === "PROBLEMS" ? "Problems for investigation and root cause tracking" : activeModule === "CHANGES" ? "Changes for planning, approval, and execution" : "All incidents in your organization"}</p>
             </div>
             <div className="queue-filters">
               <select
@@ -1952,7 +1825,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                 className="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={activeModule === "REQUESTS" ? "Search requests" : activeModule === "PROBLEMS" ? "Search problems" : "Search incidents"}
+                placeholder={activeModule === "REQUESTS" || activeModule === "APPROVALS" ? "Search requests" : activeModule === "PROBLEMS" ? "Search problems" : activeModule === "CHANGES" ? "Search changes" : "Search incidents"}
               />
             </div>
           </div>
@@ -1960,9 +1833,9 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
             <div className="empty">{activeModule === "REQUESTS" ? "Loading requests…" : activeModule === "PROBLEMS" ? "Loading problems…" : "Loading incidents…"}</div>
           ) : error ? (
             <div className="error table-error">{error}</div>
-          ) : (activeModule === "REQUESTS" ? visibleServiceRequests.length : activeModule === "PROBLEMS" ? visibleProblems.length : visibleIncidents.length) === 0 ? (
+          ) : queueItems.length === 0 ? (
             <div className="empty">
-              <b>{activeModule === "REQUESTS" ? "No matching requests" : activeModule === "PROBLEMS" ? "No matching problems" : "No matching incidents"}</b>
+              <b>{activeModule === "REQUESTS" ? "No matching requests" : activeModule === "APPROVALS" ? "No pending approvals" : activeModule === "PROBLEMS" ? "No matching problems" : activeModule === "CHANGES" ? "No matching changes" : "No matching incidents"}</b>
               <span>Try changing your search or filter.</span>
             </div>
           ) : (
@@ -1971,7 +1844,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                 <thead>
                   <tr>
                     <th>Number</th>
-                    <th>{activeModule === "REQUESTS" ? "Request" : activeModule === "PROBLEMS" ? "Problem" : "Incident"}</th>
+                    <th>{activeModule === "REQUESTS" || activeModule === "APPROVALS" ? "Request" : activeModule === "PROBLEMS" ? "Problem" : activeModule === "CHANGES" ? "Change" : "Incident"}</th>
                     <th>Status</th>
                     <th>Priority</th>
                     <th>Assignee</th>
@@ -1979,12 +1852,12 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                   </tr>
                 </thead>
                 <tbody>
-                  {(activeModule === "REQUESTS" ? visibleServiceRequests : activeModule === "PROBLEMS" ? visibleProblems : visibleIncidents).map((i) => (
+                  {queueItems.map((i) => (
                     <tr key={i.id}>
                       <td>
                         <button
                           className="ticket-link"
-                          onClick={() => activeModule === "REQUESTS" ? setSelectedRequest(i) : activeModule === "PROBLEMS" ? setSelectedProblem(i) : setSelected(i)}
+                          onClick={() => activeModule === "REQUESTS" || activeModule === "APPROVALS" ? setSelectedRequest(i) : activeModule === "PROBLEMS" ? setSelectedProblem(i) : activeModule === "CHANGES" ? setSelectedChange(i) : setSelected(i)}
                         >
                           {i.ticketNumber}
                         </button>
@@ -1992,7 +1865,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                       <td>
                         <strong>{i.title}</strong>
                         <small>
-                          {activeModule === "REQUESTS" ? i.serviceRequest?.catalogItem?.name || "Service request" : activeModule === "PROBLEMS" ? i.problem?.knownError ? "Known error" : "Root cause investigation" : i.incident?.affectedService || "General service"}
+                          {activeModule === "REQUESTS" || activeModule === "APPROVALS" ? i.serviceRequest?.catalogItem?.name || "Service request" : activeModule === "PROBLEMS" ? i.problem?.knownError ? "Known error" : "Root cause investigation" : activeModule === "CHANGES" ? `${i.change?.changeType || "NORMAL"} change - ${i.change?.risk || "MEDIUM"} risk` : i.incident?.affectedService || "General service"}
                         </small>
                       </td>
                       <td>
@@ -2056,6 +1929,18 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           }}
         />
       )}
+
+      {creatingChange && (
+        <CreateChange
+          token={session.accessToken}
+          onClose={() => setCreatingChange(false)}
+          onCreated={(change) => {
+            setChanges((x) => [change, ...x]);
+            setCreatingChange(false);
+            setActiveModule("CHANGES");
+          }}
+        />
+      )}
       {selected && (
         <IncidentDetail
           incident={selected}
@@ -2100,6 +1985,23 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           onUpdated={(updated) => {
             setSelectedProblem(updated);
             setProblems((items) =>
+              items.map((item) => (item.id === updated.id ? updated : item)),
+            );
+          }}
+        />
+      )}
+
+      {selectedChange && (
+        <ChangeDetail
+          change={selectedChange}
+          token={session.accessToken}
+          canEdit={canOperate}
+          canReopen={isAdmin}
+          groups={groups}
+          onClose={() => setSelectedChange(null)}
+          onUpdated={(updated) => {
+            setSelectedChange(updated);
+            setChanges((items) =>
               items.map((item) => (item.id === updated.id ? updated : item)),
             );
           }}

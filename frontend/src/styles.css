@@ -27,3 +27,110 @@ html[data-theme="dark"] .admin-overlay,html[data-theme="dark"] .modal-backdrop {
 html[data-theme="dark"] .user-menu { background: #111820; border-color: #28323d; box-shadow: 0 18px 40px #0009; }
 html[data-theme="dark"] .user-menu label { color: #dce5ee; }
 nav a { cursor: pointer; user-select: none; }
+.simple-user-block { grid-template-columns: 36px 1fr; align-items: start; }
+.simple-user-block strong { color: #fff; font-size: 13px; line-height: 1.2; }
+.simple-user-block .sign-out-link { display: block; margin-top: 6px; padding: 0; color: #98a2b3; font-size: 12px; text-align: left; }
+.simple-user-block .sign-out-link:hover { color: #fff; }
+.modal-head-actions { display: flex; align-items: center; gap: 8px; }
+.modal.fullscreen { width: min(1280px, 96vw); max-width: none; height: 92vh; }
+.detail-modal.fullscreen { width: min(1400px, 96vw); }
+.prb-detail-modal { width: min(1180px, 96vw); }
+.prb-detail-modal .operations-grid { align-items: start; gap: 18px; }
+.prb-detail-modal .detail-section label { display: grid; gap: 8px; margin-top: 14px; }
+
+/* Problem record layout */
+.prb-detail-modal { width: min(1180px, 96vw); }
+.prb-detail-modal.fullscreen { width: min(1500px, 98vw); height: 94vh; }
+.prb-head { align-items: flex-start; border-bottom: 1px solid #eaecf0; padding-bottom: 18px; margin-bottom: 18px; }
+.prb-head h2 { margin-bottom: 6px; }
+.prb-statement-line { margin: 0 0 10px; color: #667085; font-weight: 600; }
+.prb-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid #eaecf0; border-radius: 12px; overflow: hidden; margin: 16px 0 18px; }
+.prb-meta-grid div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-bottom: 1px solid #eaecf0; }
+.prb-meta-grid div:nth-last-child(-n+2) { border-bottom: 0; }
+.prb-meta-grid div:nth-child(odd) { border-right: 1px solid #eaecf0; }
+.prb-meta-grid span { color: #667085; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.prb-meta-grid strong { min-width: 0; overflow-wrap: anywhere; }
+.prb-main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; }
+.prb-statement label { display: grid; gap: 8px; margin-top: 14px; font-weight: 700; }
+.prb-statement textarea, .prb-statement input { width: 100%; }
+.prb-field-list { display: grid; gap: 8px; }
+.prb-field-list dt { color: #667085; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.prb-field-list dd { margin: 0 0 12px; white-space: pre-wrap; }
+.prb-side-panel { display: grid; gap: 14px; }
+.prb-tabs { margin: 18px 0 0; }
+.prb-tab-panel { margin-top: 0; border-top-left-radius: 0; }
+.prb-activity-list { margin-top: 18px; }
+.prb-task-list article { align-items: start; }
+.task-edit-row { display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)) auto; gap: 8px; margin-top: 12px; }
+html[data-theme="dark"] .prb-head, html[data-theme="dark"] .prb-meta-grid, html[data-theme="dark"] .prb-meta-grid div { border-color: #28323d; }
+html[data-theme="dark"] .prb-statement-line, html[data-theme="dark"] .prb-meta-grid span, html[data-theme="dark"] .prb-field-list dt { color: #91a0af; }
+@media(max-width:900px){.prb-main-grid,.prb-meta-grid{grid-template-columns:1fr}.prb-meta-grid div:nth-child(odd){border-right:0}.prb-meta-grid div:nth-last-child(2){border-bottom:1px solid #eaecf0}.task-edit-row{grid-template-columns:1fr}}
+
+/* Shared ticket record form layout */
+.record-form-modal { width: min(1180px, 96vw); }
+.record-form-modal.fullscreen { width: min(1500px, 98vw); height: 94vh; }
+.record-head { align-items: flex-start; border-bottom: 1px solid #eaecf0; padding-bottom: 16px; margin-bottom: 16px; }
+.record-two-column { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; }
+.record-main-stack, .record-side-stack { display: grid; gap: 14px; align-content: start; }
+.record-side-stack { position: sticky; top: 0; }
+.compact-fields dl, dl.compact-fields { display: grid; grid-template-columns: 150px minmax(0, 1fr); column-gap: 14px; row-gap: 10px; margin: 0; }
+.compact-fields dt, dl.compact-fields dt { color: #667085; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.compact-fields dd, dl.compact-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.problem-form-fields label { display: grid; gap: 8px; margin-top: 14px; font-weight: 700; }
+.problem-form-fields input, .problem-form-fields textarea { width: 100%; }
+.record-tab-shell { margin-top: 18px; }
+.record-tab-shell .record-tabs { margin-bottom: 18px; }
+.approval-step-list { display: grid; gap: 10px; }
+.approval-step-list article { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px; border: 1px solid #eaecf0; border-radius: 12px; }
+.approval-step-list article > b { color: #667085; font-size: 12px; }
+.approval-step-list strong, .approval-step-list small { display: block; }
+.approval-step-list small { color: #667085; margin-top: 3px; }
+.approval-actions { display: flex; gap: 8px; }
+.link-button { border: 0; background: none; color: #087443; padding: 0; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
+.task-number-link { white-space: nowrap; }
+.task-card-list article { align-items: start; }
+html[data-theme="dark"] .record-head, html[data-theme="dark"] .approval-step-list article { border-color: #28323d; }
+html[data-theme="dark"] .compact-fields dt, html[data-theme="dark"] dl.compact-fields dt, html[data-theme="dark"] .approval-step-list article > b, html[data-theme="dark"] .approval-step-list small { color: #91a0af; }
+html[data-theme="dark"] .link-button { color: var(--brand-accent); }
+@media(max-width:900px){.record-two-column{grid-template-columns:1fr}.record-side-stack{position:static}.compact-fields dl,dl.compact-fields{grid-template-columns:1fr}.approval-step-list article{grid-template-columns:1fr}.approval-actions{justify-content:flex-start}}
+
+/* Prevent right-side ticket form panel from inheriting the app navigator aside styling */
+aside.record-side-stack {
+  position: sticky;
+  top: 0;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: grid;
+  flex-direction: initial;
+}
+.record-side-stack .detail-section { width: 100%; }
+.record-side-stack .assignment-row.stacked { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.record-side-stack .assignment-row.stacked select,
+.record-side-stack .assignment-row.stacked button,
+.record-side-stack .status-row select,
+.record-side-stack .status-row button { width: 100%; }
+.record-side-stack .status-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+html[data-theme="dark"] aside.record-side-stack { background: transparent; color: inherit; border-right: 0; }
+@media(max-width:900px){aside.record-side-stack{position:static;width:auto;height:auto;padding:0}}
+
+/* Problem task tab layout */
+.problem-task-workspace { display: grid; gap: 16px; }
+.problem-task-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.problem-task-list { display: grid; gap: 10px; }
+.problem-task-card { display: grid; gap: 5px; text-align: left; padding: 13px 14px; border: 1px solid #eaecf0; border-radius: 12px; background: #fff; color: inherit; }
+.problem-task-card:hover, .problem-task-card.active { border-color: var(--brand-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-accent) 14%, transparent); }
+.problem-task-card strong { color: #087443; }
+.problem-task-card span { font-weight: 700; }
+.problem-task-card small { color: #667085; }
+.problem-task-detail { border: 1px solid #eaecf0; border-radius: 12px; padding: 18px; background: #fff; }
+.task-detail-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; border-bottom: 1px solid #eaecf0; padding-bottom: 12px; margin-bottom: 14px; }
+.task-detail-head h3 { margin: 4px 0 0; }
+html[data-theme="dark"] .problem-task-card, html[data-theme="dark"] .problem-task-detail { background: #111820; border-color: #28323d; }
+html[data-theme="dark"] .problem-task-card strong { color: var(--brand-accent); }
+html[data-theme="dark"] .problem-task-card small { color: #91a0af; }
+html[data-theme="dark"] .task-detail-head { border-color: #28323d; }
+@media(max-width:900px){.problem-task-layout{grid-template-columns:1fr}}

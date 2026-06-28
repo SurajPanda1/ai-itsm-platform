@@ -192,7 +192,7 @@ export default function AdminConsole({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [storageTested, setStorageTested] = useState(false);
-  const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "add-department" | "department-list" | "edit-department">("user-list");
+  const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "edit-user" | "add-department" | "department-list" | "edit-department">("user-list");
   const [groupsPanel, setGroupsPanel] = useState<"add-group" | "group-list" | "edit-group">("group-list");
   const [catalogPanel, setCatalogPanel] = useState<"add-category" | "add-item" | "add-approval" | "approval-list" | "edit-approval" | "catalog-list" | "category-items" | "edit-category" | "edit-item">("catalog-list");
   const [slaPanel, setSlaPanel] = useState<"add-sla" | "add-calendar" | "sla-list" | "edit-sla">("sla-list");
@@ -334,7 +334,7 @@ export default function AdminConsole({
   }
   function startEditUser(user: AdminUser) {
     setEditingUser(user);
-    setUsersPanel("user-list");
+    setUsersPanel("edit-user");
     setEditUser({
       name: user.name,
       phone: user.phone || "",
@@ -419,6 +419,7 @@ export default function AdminConsole({
         active: editUser.active,
       });
       setEditingUser(null);
+      setUsersPanel("user-list");
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not update user");
@@ -779,10 +780,10 @@ export default function AdminConsole({
           <div className="admin-grid">
             <div className="admin-form-stack">
               <div className="admin-form admin-card-menu">
-                <button type="button" className={usersPanel === "add-user" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("add-user")}>Add User</button>
-                <button type="button" className={usersPanel === "user-list" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("user-list")}>User List</button>
-                <button type="button" className={usersPanel === "add-department" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("add-department")}>Add Department</button>
-                <button type="button" className={usersPanel === "department-list" ? "secondary active" : "secondary"} onClick={() => setUsersPanel("department-list")}>Department List</button>
+                <button type="button" className={usersPanel === "add-user" ? "secondary active" : "secondary"} onClick={() => { setEditingUser(null); setUsersPanel("add-user"); }}>Add User</button>
+                <button type="button" className={usersPanel === "user-list" ? "secondary active" : "secondary"} onClick={() => { setEditingUser(null); setUsersPanel("user-list"); }}>User List</button>
+                <button type="button" className={usersPanel === "add-department" ? "secondary active" : "secondary"} onClick={() => { setEditingUser(null); setUsersPanel("add-department"); }}>Add Department</button>
+                <button type="button" className={usersPanel === "department-list" ? "secondary active" : "secondary"} onClick={() => { setEditingUser(null); setUsersPanel("department-list"); }}>Department List</button>
               </div>
             {usersPanel === "add-user" && <form className="admin-form" onSubmit={createUser}>
               <h2>Add user</h2>
@@ -913,7 +914,7 @@ export default function AdminConsole({
                 <button className="primary" disabled={busy}>Save department</button>
               </div>
             </form>}
-            {editingUser && usersPanel === "user-list" && (
+            {editingUser && usersPanel === "edit-user" && (
               <form className="admin-form" onSubmit={saveUserEdit}>
                 <h2>Edit user</h2>
                 <p className="muted">{editingUser.email}</p>
@@ -948,7 +949,7 @@ export default function AdminConsole({
                   Active
                 </label>
                 <div className="modal-actions">
-                  <button type="button" className="secondary" onClick={() => setEditingUser(null)}>Cancel</button>
+                  <button type="button" className="secondary" onClick={() => { setEditingUser(null); setUsersPanel("user-list"); }}>Cancel</button>
                   <button className="primary" disabled={busy}>Save user</button>
                 </div>
               </form>

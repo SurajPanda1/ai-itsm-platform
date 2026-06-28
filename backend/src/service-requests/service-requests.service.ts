@@ -162,7 +162,18 @@ export class ServiceRequestsService {
     if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
     if (!openStatus || !type || !priority) throw new BadRequestException('Required lookup data is missing');
     if (!item) throw new BadRequestException('Service catalog item is not available');
-    const requiresApproval = item.approvalRules.length > 0;
+    const resolvedApprovalRules = item.approvalRules.flatMap((rule) => {
+      const approverId =
+        rule.approvalType === 'MANAGER'
+          ? dbUser.managerId
+          : rule.approvalType === 'GROUP'
+            ? rule.approvalGroup?.managerId
+            : rule.specificApproverId;
+      if (!approverId && rule.approvalType === 'MANAGER' && dbUser.managerRequiredExempt) return [];
+      if (!approverId) throw new BadRequestException(`Approval rule ${rule.sequence} does not resolve to an approver`);
+      return [{ rule, approverId }];
+    });
+    const requiresApproval = resolvedApprovalRules.length > 0;
     if (requiresApproval && !approvalStatus) throw new BadRequestException('AWAITING_APPROVAL status lookup is missing');
 
     const matchingSlas = await this.prisma.slaDefinition.findMany({
@@ -196,9 +207,7 @@ export class ServiceRequestsService {
       });
       await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE_SERVICE_REQUEST', newValue: { ticketNumber: ticket.ticketNumber, title: ticket.title, catalogItemId: item.id }, changedById: user.id } });
       if (requiresApproval) {
-        for (const rule of item.approvalRules) {
-          const approverId = rule.approvalType === 'MANAGER' ? dbUser.managerId : rule.approvalType === 'GROUP' ? rule.approvalGroup?.managerId : rule.specificApproverId;
-          if (!approverId) throw new BadRequestException(`Approval rule ${rule.sequence} does not resolve to an approver`);
+        for (const { rule, approverId } of resolvedApprovalRules) {
           await tx.serviceApproval.create({ data: { serviceRequestId: ticket.serviceRequest!.id, approvalRuleId: rule.id, sequence: rule.sequence, approvalType: rule.approvalType, approverId } });
         }
       } else {
@@ -223,6 +232,26 @@ export class ServiceRequestsService {
       include: serviceRequestInclude,
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async pendingApprovals(user: AuthUser) {
+    const approvals = await this.prisma.serviceApproval.findMany({
+      where: {
+        status: 'PENDING',
+        approverId: user.id,
+        serviceRequest: { ticket: { organizationId: user.organizationId } },
+      },
+      include: { serviceRequest: { include: { ticket: { include: serviceRequestInclude } } } },
+      orderBy: [{ sequence: 'asc' }, { createdAt: 'asc' }],
+    });
+    const seen = new Set<string>();
+    return approvals
+      .map((approval) => approval.serviceRequest.ticket)
+      .filter((ticket) => {
+        if (seen.has(ticket.id)) return false;
+        seen.add(ticket.id);
+        return true;
+      });
   }
 
   async findOne(user: AuthUser, id: string) {

@@ -56,6 +56,11 @@ export class ServiceRequestsController {
     return this.serviceRequests.findAll(user);
   }
 
+  @Get('approvals/pending')
+  pendingApprovals(@CurrentUser() user: AuthUser) {
+    return this.serviceRequests.pendingApprovals(user);
+  }
+
   @Get(':id')
   findOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.serviceRequests.findOne(user, id);

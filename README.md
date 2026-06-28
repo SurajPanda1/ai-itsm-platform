@@ -4,7 +4,7 @@ AI-first, lightweight IT service management platform for small and mid-sized org
 
 ## Current status
 
-The PostgreSQL foundation, incident-management slice, service-request foundation, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
+The PostgreSQL foundation, incident-management slice, service-request foundation, problem foundation, change foundation, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
 
 Completed in the current MVP:
 
@@ -19,6 +19,7 @@ Completed in the current MVP:
 - Service Catalogue with category tiles, catalogue items, default routing groups, approval rules, admin-friendly form-field helpers, task-template helpers, and employee service request submission/listing
 - Service Request fulfilment with approvals, approval decisions, generated request tasks, task assignment, task status updates, work notes, attachments, and SLA snapshots
 - Problem Management foundation with PRB records, root cause, workaround, permanent fix, known-error flag, assignment/status/work notes, and PTasks
+- Change Management foundation with CHG records, change type, risk/impact, planned window, implementation/backout/test plans, assignment/status/work notes, and related items
 - Sequential incident numbers such as `INC000002`
 - Assignment groups and group membership
 - Related child incidents, changes, and problems
@@ -34,7 +35,7 @@ Completed in the current MVP:
 - Admin Console for users, departments, assignment groups, service catalogue, approval rules, SLA policies, business calendars, branding, theme defaults, and attachment storage
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
-Change, CMDB, knowledge, notifications, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests and Problems now have first workflow slices, but richer workflow automation, reporting, and cross-module analytics are still upcoming.
+CMDB, knowledge, notifications, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests, Problems, and Changes now have first workflow slices, but richer workflow automation, approvals/CAB, reporting, and cross-module analytics are still upcoming.
 
 ## Architecture
 
@@ -114,6 +115,7 @@ npx.cmd prisma db execute --file prisma/manual/012_service_catalog_requests.sql 
 npx.cmd prisma db execute --file prisma/manual/013_approval_task_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/014_user_group_department_admin.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/015_problem_foundation.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/016_change_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -201,6 +203,16 @@ Problems:
 - `POST /api/problems/:id/comments`
 - `POST /api/problems/:id/tasks`
 - `PATCH /api/problems/:id/tasks/:taskId`
+
+Changes:
+
+- `POST /api/changes`
+- `GET /api/changes`
+- `GET /api/changes/:id`
+- `PATCH /api/changes/:id`
+- `PATCH /api/changes/:id/assignment`
+- `PATCH /api/changes/:id/status`
+- `POST /api/changes/:id/comments`
 
 Supporting endpoints:
 

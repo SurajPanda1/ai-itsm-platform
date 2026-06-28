@@ -9,6 +9,33 @@ CREATE TABLE IF NOT EXISTS problems (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'problems' AND column_name = 'permanent_solution'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'problems' AND column_name = 'permanent_fix'
+  ) THEN
+    ALTER TABLE problems RENAME COLUMN permanent_solution TO permanent_fix;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'problems' AND column_name = 'permanent_fix'
+  ) THEN
+    ALTER TABLE problems ADD COLUMN permanent_fix text;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'problems' AND column_name = 'resolved_at'
+  ) THEN
+    ALTER TABLE problems ADD COLUMN resolved_at timestamptz;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS problem_tasks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   problem_id uuid NOT NULL REFERENCES problems(id) ON DELETE CASCADE,

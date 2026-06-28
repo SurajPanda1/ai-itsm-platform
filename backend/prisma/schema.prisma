@@ -73,6 +73,7 @@ model User {
   assignedRequestTasks       RequestTask[]           @relation("RequestTaskAssignee")
   createdProblemTasks        ProblemTask[]           @relation("ProblemTaskCreator")
   assignedProblemTasks       ProblemTask[]           @relation("ProblemTaskAssignee")
+  requestedChanges           Change[]                @relation("ChangeRequester")
 
   @@map("users")
 }
@@ -154,6 +155,7 @@ model Ticket {
   incident          Incident?
   serviceRequest    ServiceRequest?
   problem           Problem?
+  change            Change?
   activities        TicketActivity[]
   slas              TicketSla[]
   attachments       TicketAttachment[]
@@ -415,6 +417,28 @@ model ProblemTask {
   @@index([problemId])
   @@index([assignmentGroupId, status])
   @@map("problem_tasks")
+}
+
+model Change {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId           String    @unique @map("ticket_id") @db.Uuid
+  requestedById      String    @map("requested_by") @db.Uuid
+  changeType         String    @default("STANDARD") @map("change_type") @db.VarChar(30)
+  risk               String    @default("LOW") @db.VarChar(20)
+  impact             String    @default("LOW") @db.VarChar(20)
+  plannedStart       DateTime? @map("planned_start")
+  plannedEnd         DateTime? @map("planned_end")
+  implementationPlan String?   @map("implementation_plan")
+  backoutPlan        String?   @map("backout_plan")
+  testPlan           String?   @map("test_plan")
+  actualStart        DateTime? @map("actual_start")
+  actualEnd          DateTime? @map("actual_end")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  ticket             Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requestedBy        User      @relation("ChangeRequester", fields: [requestedById], references: [id])
+
+  @@index([requestedById])
+  @@map("changes")
 }
 
 model ActivityType {
