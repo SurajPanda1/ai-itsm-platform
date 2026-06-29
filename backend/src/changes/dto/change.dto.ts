@@ -1,8 +1,9 @@
-import { IsDateString, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 const priorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 const changeTypes = ['STANDARD', 'NORMAL', 'EMERGENCY'] as const;
 const riskLevels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+export const changeStatuses = ['NEW', 'PLAN', 'APPROVAL', 'CAB', 'SCHEDULED', 'IMPLEMENT', 'VALIDATE', 'CLOSED'] as const;
 
 export class CreateChangeDto {
   @IsString() @MinLength(3) @MaxLength(200) title!: string;
@@ -14,8 +15,9 @@ export class CreateChangeDto {
   @IsOptional() @IsDateString() plannedStart?: string;
   @IsOptional() @IsDateString() plannedEnd?: string;
   @IsOptional() @IsString() implementationPlan?: string;
-  @IsOptional() @IsString() backoutPlan?: string;
+  @IsOptional() @IsString() rollbackPlan?: string;
   @IsOptional() @IsString() testPlan?: string;
+  @IsOptional() @IsUUID() configurationItemId?: string;
 }
 
 export class UpdateChangeDto {
@@ -28,6 +30,12 @@ export class UpdateChangeDto {
   @IsOptional() @IsDateString() plannedStart?: string;
   @IsOptional() @IsDateString() plannedEnd?: string;
   @IsOptional() @IsString() implementationPlan?: string;
-  @IsOptional() @IsString() backoutPlan?: string;
+  @IsOptional() @IsString() rollbackPlan?: string;
   @IsOptional() @IsString() testPlan?: string;
+  @IsOptional() @IsUUID() configurationItemId?: string;
+}
+
+export class ChangeChangeStatusDto {
+  @IsIn(changeStatuses)
+  status!: (typeof changeStatuses)[number];
 }

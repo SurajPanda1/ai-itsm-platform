@@ -15,9 +15,11 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { ServiceRequestsModule } from './service-requests/service-requests.module';
 import { ProblemsModule } from './problems/problems.module';
 import { ChangesModule } from './changes/changes.module';
+import { UsersModule } from './users/users.module';
+import { ConfigurationItemsModule } from './configuration-items/configuration-items.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AnalyticsModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, ServiceRequestsModule, ProblemsModule, ChangesModule, IncidentsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AnalyticsModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, UsersModule, ConfigurationItemsModule, ServiceRequestsModule, ProblemsModule, ChangesModule, IncidentsModule],
   controllers: [AppController],
   providers: [AppService],
 })

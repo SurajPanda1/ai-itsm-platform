@@ -2,9 +2,9 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } f
 import { AuthUser } from '../auth/auth-user';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { AddCommentDto, AssignIncidentDto, ChangeStatusDto } from '../incidents/dto/incident-actions.dto';
+import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
 import { ChangesService } from './changes.service';
-import { CreateChangeDto, UpdateChangeDto } from './dto/change.dto';
+import { ChangeChangeStatusDto, CreateChangeDto, UpdateChangeDto } from './dto/change.dto';
 
 @Controller('changes')
 @UseGuards(JwtAuthGuard)
@@ -27,7 +27,7 @@ export class ChangesController {
   assign(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AssignIncidentDto) { return this.changes.assign(user, id, dto); }
 
   @Patch(':id/status')
-  changeStatus(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeStatusDto) { return this.changes.changeStatus(user, id, dto); }
+  changeStatus(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeChangeStatusDto) { return this.changes.changeStatus(user, id, dto); }
 
   @Post(':id/comments')
   comment(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AddCommentDto) { return this.changes.addComment(user, id, dto); }

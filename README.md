@@ -4,7 +4,7 @@ AI-first, lightweight IT service management platform for small and mid-sized org
 
 ## Current status
 
-The PostgreSQL foundation, incident-management slice, service-request foundation, problem foundation, change foundation, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
+The PostgreSQL foundation, incident-management slice, service-request foundation, problem foundation, change foundation, CMDB foundation, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
 
 Completed in the current MVP:
 
@@ -20,6 +20,7 @@ Completed in the current MVP:
 - Service Request fulfilment with approvals, approval decisions, generated request tasks, task assignment, task status updates, work notes, attachments, and SLA snapshots
 - Problem Management foundation with PRB records, root cause, workaround, permanent fix, known-error flag, assignment/status/work notes, and PTasks
 - Change Management foundation with CHG records, change type, risk/impact, planned window, implementation/backout/test plans, assignment/status/work notes, and related items
+- CMDB foundation with configuration items, category/type lookup tables, CI relationships, related ticket visibility, CSV import preview/validation/import, and Admin Console CMDB Settings
 - Sequential incident numbers such as `INC000002`
 - Assignment groups and group membership
 - Related child incidents, changes, and problems
@@ -32,10 +33,10 @@ Completed in the current MVP:
 - Ticket attachment upload, listing, download, deletion, metadata, permissions, and audit logging
 - Storage adapters for local/on-premises filesystems, Amazon S3, Azure Blob, Google Cloud Storage, and MinIO/S3-compatible services
 - Analytics Console with Incident and Service Request module reporting, KPIs, trends, SLA outcomes, aging, workload reporting, filters, scoped access, and CSV export
-- Admin Console for users, departments, assignment groups, service catalogue, approval rules, SLA policies, business calendars, branding, theme defaults, and attachment storage
+- Admin Console for users, departments, assignment groups, service catalogue, approval rules, CMDB categories/types/relationship types, SLA policies, business calendars, branding, theme defaults, and attachment storage
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
-CMDB, knowledge, notifications, advanced reporting, and AI interfaces are not yet implemented in the application layer. Service Requests, Problems, and Changes now have first workflow slices, but richer workflow automation, approvals/CAB, reporting, and cross-module analytics are still upcoming.
+Knowledge, notifications, advanced reporting, graphical CMDB dependency maps, and AI interfaces are not yet implemented in the application layer. Service Requests, Problems, Changes, and CMDB now have first workflow slices, but richer workflow automation, approvals/CAB, reporting, relationship import/export, and cross-module analytics are still upcoming.
 
 ## Architecture
 
@@ -116,6 +117,13 @@ npx.cmd prisma db execute --file prisma/manual/013_approval_task_foundation.sql 
 npx.cmd prisma db execute --file prisma/manual/014_user_group_department_admin.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/015_problem_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/016_change_foundation.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/017_incident_created_for.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/018_ci_and_problem_workflow.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/019_problem_impact_risk.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/020_change_workflow_statuses.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/021_change_approvals.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/022_cmdb_foundation.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/023_cmdb_lookup_admin.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -214,6 +222,22 @@ Changes:
 - `PATCH /api/changes/:id/status`
 - `POST /api/changes/:id/comments`
 
+CMDB:
+
+- `GET /api/configuration-items/lookups`
+- `GET /api/configuration-items/search`
+- `GET /api/configuration-items`
+- `GET /api/configuration-items/items/:id`
+- `POST /api/configuration-items`
+- `PATCH /api/configuration-items/items/:id`
+- `PATCH /api/configuration-items/items/:id/deactivate`
+- `GET /api/configuration-items/relationships/list`
+- `POST /api/configuration-items/relationships`
+- `PATCH /api/configuration-items/relationships/:id`
+- `DELETE /api/configuration-items/relationships/:id`
+- `POST /api/configuration-items/import/preview`
+- `POST /api/configuration-items/import/confirm`
+
 Supporting endpoints:
 
 - `GET /api/assignment-groups`
@@ -235,6 +259,13 @@ Supporting endpoints:
 - `GET /api/analytics/export.csv`
 - `GET /api/admin/slas`
 - `POST /api/admin/slas`
+- `GET /api/admin/cmdb-settings`
+- `POST /api/admin/cmdb-settings/categories`
+- `PATCH /api/admin/cmdb-settings/categories/:id`
+- `POST /api/admin/cmdb-settings/types`
+- `PATCH /api/admin/cmdb-settings/types/:id`
+- `POST /api/admin/cmdb-settings/relationship-types`
+- `PATCH /api/admin/cmdb-settings/relationship-types/:id`
 
 ## Admin Console and service catalogue
 
@@ -243,6 +274,7 @@ The Admin Console uses a left-side feature navigator and right-side workspace pa
 - **Users**: add users, list/edit users, add departments, and edit departments.
 - **Assignment Groups**: add/list/edit groups, assign group roles, manage members, and maintain manager/email/phone metadata.
 - **Service Catalogue**: manage categories as tiles, drill into catalogue items, edit categories/items, add approval rules, and add simple form fields/task templates without hand-writing JSON.
+- **CMDB Settings**: manage CI categories, category-filtered CI types, and CI relationship types. Configuration items store lookup references (`ci_category_id`, `ci_type_id`) instead of hardcoded category/type strings.
 - **SLA Policies**: create SLA policies and business calendars, and deactivate existing policy versions.
 - **Branding & Storage**: configure organization identity, logo/favicon, colors, theme defaults, attachment provider, storage location, and connection testing.
 
@@ -303,6 +335,6 @@ Before production use, the project still requires automated tests, managed migra
 2. Improve the Service Request form renderer so catalogue form schema fields are shown to employees as real dynamic fields.
 3. Add approval-rule list/edit/deactivate screens and richer request-task reporting.
 4. Expand Problem Management with known-error database behavior, root-cause analytics, and incident-to-problem workflows.
-5. Implement Change Management, including change approvals and risk workflows.
-6. Implement CMDB and knowledge management.
-7. Add notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.
+5. Expand Change Management automation, CAB scheduling, and risk workflows.
+6. Expand CMDB with relationship import/update import, CSV export, and graphical dependency maps.
+7. Add knowledge management, notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.

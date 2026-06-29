@@ -8,12 +8,19 @@ import type {
   AssignmentGroup,
   Attachment,
   Branding,
+  CmdbImportPreview,
+  CmdbLookupData,
+  CmdbRelationship,
+  ConfigurationItem,
   Incident,
+  ProblemTask,
   ReferenceData,
   RelatedItem,
+  RequestTask,
   ServiceCatalogCategory,
   Session,
   SlaDefinition,
+  User,
 } from "./types";
 
 const sessionKey = "ai-itsm-session";
@@ -21,7 +28,143 @@ const activityKey = "ai-itsm-last-activity";
 const themePreferenceKey = "ai-itsm-theme-preference";
 const modulePreferenceKey = "ai-itsm-active-module";
 const defaultBranding: Branding = { organizationName: "Nextris", portalTitle: "Nextris Sevā", welcomeMessage: "How can we help?", primaryColor: "#16a394", accentColor: "#6ee7b7", showPoweredBy: true, themeMode: "DARK" };
+const relationshipLabel = (value: string) => ({
+  CHILD_INCIDENT: "Child incident",
+  PARENT_INCIDENT: "Parent incident",
+  RELATED_CHANGE: "Related change",
+  RELATED_PROBLEM: "Related problem",
+  RELATED_INCIDENT: "Related incident",
+  CAUSED_BY_CHANGE: "Caused by change",
+  CAUSED_INCIDENT: "Caused incident",
+  IMPLEMENTED_BY_CHANGE: "Implemented by change",
+  IMPLEMENTS: "Implements",
+}[value] || value.replaceAll("_", " ").toLowerCase());
 type ThemePreference = "DARK" | "LIGHT" | "SYSTEM";
+type RequestQueueItem = { kind: "request"; ticket: Incident } | { kind: "request-task"; ticket: Incident; task: RequestTask };
+type ProblemQueueItem = { kind: "problem"; ticket: Incident } | { kind: "problem-task"; ticket: Incident; task: ProblemTask };
+const problemStatusOptions = ["OPEN", "ASSESS", "ROOT_CAUSE_ANALYSIS", "FIX", "RESOLVED", "CLOSED"];
+const changeStatusOptions = ["NEW", "PLAN", "APPROVAL", "CAB", "SCHEDULED", "IMPLEMENT", "VALIDATE", "CLOSED"];
+const isOngoingTicket = (ticket: Incident) => !["RESOLVED", "CLOSED"].includes(ticket.status?.name || "");
+const isOngoingChange = (ticket: Incident) => ticket.status?.name !== "CLOSED";
+
+function UserSearchPicker({
+  token,
+  label,
+  selected,
+  onSelect,
+}: {
+  token: string;
+  label: string;
+  selected: Pick<User, "id" | "name" | "email"> | null;
+  onSelect: (user: Pick<User, "id" | "name" | "email"> | null) => void;
+}) {
+  const [query, setQuery] = useState(selected?.name || "");
+  const [results, setResults] = useState<Pick<User, "id" | "name" | "email">[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      api.userSearch(token, query)
+        .then(setResults)
+        .catch(() => setResults([]))
+        .finally(() => setLoading(false));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [token, query]);
+
+  return (
+    <label className="user-search-picker">
+      {label}
+      <input
+        value={query}
+        required
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onSelect(null);
+        }}
+        placeholder="Search by name or email"
+      />
+      {selected ? (
+        <small className="selected-user">Selected: {selected.name} ({selected.email})</small>
+      ) : (
+        <small className="muted">{loading ? "Searching..." : "Select a user from the list."}</small>
+      )}
+      {!selected && results.length > 0 && (
+        <div className="user-search-results">
+          {results.map((user) => (
+            <button
+              type="button"
+              key={user.id}
+              onClick={() => {
+                onSelect(user);
+                setQuery(user.name);
+                setResults([]);
+              }}
+            >
+              <strong>{user.name}</strong>
+              <span>{user.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </label>
+  );
+}
+
+function ConfigurationItemPicker({
+  token,
+  selected,
+  onSelect,
+}: {
+  token: string;
+  selected: ConfigurationItem | null;
+  onSelect: (item: ConfigurationItem | null) => void;
+}) {
+  const [query, setQuery] = useState(selected?.name || "");
+  const [results, setResults] = useState<ConfigurationItem[]>([]);
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api.configurationItemSearch(token, query)
+        .then(setResults)
+        .catch(() => setResults([]));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [token, query]);
+
+  return (
+    <label className="user-search-picker">
+      Configuration Item
+      <input
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onSelect(null);
+        }}
+        placeholder="Search CI by name or type"
+      />
+      {selected ? (
+        <small className="selected-user">Linked: {selected.name}{selected.ciType ? ` · ${selected.ciType}` : ""}</small>
+      ) : (
+        <small className="muted">Optional. Type at least 2 characters to search.</small>
+      )}
+      {!selected && results.length > 0 && (
+        <div className="user-search-results">
+          {results.map((item) => (
+            <button type="button" key={item.id} onClick={() => { onSelect(item); setQuery(item.name); setResults([]); }}>
+              <strong>{item.name}</strong>
+              <span>{item.ciType || "Configuration item"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </label>
+  );
+}
 
 function resolveTheme(themeMode: ThemePreference) {
   if (themeMode === "SYSTEM") {
@@ -36,6 +179,11 @@ function applyThemePreference(themeMode: ThemePreference) {
 
 function Brand({ branding }: { branding: Branding }) {
   return <div className="brand">{branding.logoUrl ? <img className="brand-logo" src={branding.logoUrl} alt={`${branding.organizationName} logo`} /> : <span className="brand-mark">{branding.organizationName.slice(0, 1).toUpperCase()}</span>}<span>{branding.portalTitle || branding.organizationName}</span></div>;
+}
+
+function AttachmentPanel({ attachments, enabled, maxFileSizeMb, busy, onUpload, onDownload, onDelete }: { attachments: Attachment[]; enabled?: boolean; maxFileSizeMb?: number; busy: boolean; onUpload: (file?: File) => void; onDownload: (item: Attachment) => void; onDelete: (id: string) => void }) {
+  if (!enabled) return <p className="muted">Attachments are configured but not active for this tenant yet.</p>;
+  return <div className="attachment-panel"><label className="attachment-upload">Add attachment <small>Maximum {maxFileSizeMb || 10} MB</small><input type="file" disabled={busy} onChange={(e)=>{onUpload(e.target.files?.[0]);e.target.value='';}}/></label>{attachments.length===0?<p className="muted">No attachments yet.</p>:<div className="attachment-list">{attachments.map(item=><article key={item.id}><div><b>{item.fileName}</b><small>{(item.sizeBytes/1024).toFixed(1)} KB · {item.uploadedBy.name} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="secondary small" onClick={()=>onDownload(item)}>Download</button><button className="icon-button danger" title="Delete attachment" onClick={()=>onDelete(item.id)}>×</button></article>)}</div>}</div>;
 }
 
 function Login({ onLogin, branding }: { onLogin: (session: Session) => void; branding: Branding }) {
@@ -116,10 +264,12 @@ function Login({ onLogin, branding }: { onLogin: (session: Session) => void; bra
 
 function CreateIncident({
   token,
+  currentUser,
   onCreated,
   onClose,
 }: {
   token: string;
+  currentUser: Pick<User, "id" | "name" | "email">;
   onCreated: (i: Incident) => void;
   onClose: () => void;
 }) {
@@ -134,14 +284,21 @@ function CreateIncident({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [createdFor, setCreatedFor] = useState<Pick<User, "id" | "name" | "email"> | null>(currentUser);
+  const [configurationItem, setConfigurationItem] = useState<ConfigurationItem | null>(null);
   const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
   useEffect(() => { api.attachmentConfiguration(token).then(setAttachmentConfig).catch(() => setAttachmentConfig(null)); }, [token]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    if (!createdFor) {
+      setError("Created for is required.");
+      setBusy(false);
+      return;
+    }
     try {
-      const incident = await api.createIncident(token, form);
+      const incident = await api.createIncident(token, { ...form, createdForId: createdFor.id, configurationItemId: configurationItem?.id });
       for (const file of files) await api.uploadAttachment(token, incident.id, file);
       onCreated(incident);
     } catch (reason) {
@@ -179,6 +336,14 @@ function CreateIncident({
             autoFocus
           />
         </label>
+        <div className="readonly-field-grid">
+          <div>
+            <span>Opened by</span>
+            <strong>{currentUser.name}</strong>
+          </div>
+        </div>
+        <UserSearchPicker token={token} label="Created for" selected={createdFor} onSelect={setCreatedFor} />
+        <ConfigurationItemPicker token={token} selected={configurationItem} onSelect={setConfigurationItem} />
         <label>
           Description
           <textarea
@@ -230,11 +395,13 @@ function CreateIncident({
 
 function CreateServiceRequest({
   token,
+  currentUser,
   catalog,
   onCreated,
   onClose,
 }: {
   token: string;
+  currentUser: Pick<User, "id" | "name" | "email">;
   catalog: ServiceCatalogCategory[];
   onCreated: (i: Incident) => void;
   onClose: () => void;
@@ -249,6 +416,7 @@ function CreateServiceRequest({
   }) : [];
   const [form, setForm] = useState({ title: "", description: "", details: "" });
   const [requestDetails, setRequestDetails] = useState<Record<string, string>>({});
+  const [createdFor, setCreatedFor] = useState<Pick<User, "id" | "name" | "email"> | null>(currentUser);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => { setRequestDetails({}); }, [catalogItemId]);
@@ -261,9 +429,15 @@ function CreateServiceRequest({
     }
     setBusy(true);
     setError("");
+    if (!createdFor) {
+      setError("Created for is required.");
+      setBusy(false);
+      return;
+    }
     try {
       onCreated(await api.createServiceRequest(token, {
         catalogItemId,
+        requestedForId: createdFor.id,
         title: form.title,
         description: form.description,
         requestDetails: schemaFields.length > 0 ? requestDetails : { details: form.details },
@@ -298,6 +472,13 @@ function CreateServiceRequest({
           Title
           <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} minLength={3} maxLength={200} placeholder="What do you need?" required autoFocus />
         </label>
+        <div className="readonly-field-grid">
+          <div>
+            <span>Opened by</span>
+            <strong>{currentUser.name}</strong>
+          </div>
+        </div>
+        <UserSearchPicker token={token} label="Created for" selected={createdFor} onSelect={setCreatedFor} />
         <label>
           Description
           <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} placeholder="Short summary of the request" />
@@ -335,14 +516,15 @@ function CreateServiceRequest({
 }
 
 function CreateProblem({ token, onCreated, onClose }: { token: string; onCreated: (i: Incident) => void; onClose: () => void }) {
-  const [form, setForm] = useState({ title: "", description: "", priority: "MEDIUM", rootCause: "", workaround: "", permanentFix: "", knownError: false });
+  const [form, setForm] = useState({ title: "", description: "", priority: "MEDIUM", impact: "MEDIUM", risk: "MEDIUM", rootCause: "", workaround: "", permanentFix: "", knownError: false });
+  const [configurationItem, setConfigurationItem] = useState<ConfigurationItem | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      onCreated(await api.createProblem(token, form));
+      onCreated(await api.createProblem(token, { ...form, configurationItemId: configurationItem?.id }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create problem");
     } finally { setBusy(false); }
@@ -353,7 +535,9 @@ function CreateProblem({ token, onCreated, onClose }: { token: string; onCreated
         <div className="modal-head"><div><p className="eyebrow">PROBLEM MANAGEMENT</p><h2>Create problem</h2></div><button type="button" className="icon-button" onClick={onClose}>×</button></div>
         <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} minLength={3} maxLength={200} required autoFocus /></label>
         <label>Description<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></label>
+        <ConfigurationItemPicker token={token} selected={configurationItem} onSelect={setConfigurationItem} />
         <label>Priority<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
+        <div className="form-grid"><label>Impact<select value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Risk<select value={form.risk} onChange={(e) => setForm({ ...form, risk: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label></div>
         <label>Root cause<textarea value={form.rootCause} onChange={(e) => setForm({ ...form, rootCause: e.target.value })} rows={3} /></label>
         <label>Workaround<textarea value={form.workaround} onChange={(e) => setForm({ ...form, workaround: e.target.value })} rows={3} /></label>
         <label>Permanent fix<textarea value={form.permanentFix} onChange={(e) => setForm({ ...form, permanentFix: e.target.value })} rows={3} /></label>
@@ -366,14 +550,15 @@ function CreateProblem({ token, onCreated, onClose }: { token: string; onCreated
 }
 
 function CreateChange({ token, onCreated, onClose }: { token: string; onCreated: (i: Incident) => void; onClose: () => void }) {
-  const [form, setForm] = useState({ title: "", description: "", priority: "MEDIUM", changeType: "NORMAL", risk: "MEDIUM", impact: "MEDIUM", plannedStart: "", plannedEnd: "", implementationPlan: "", backoutPlan: "", testPlan: "" });
+  const [form, setForm] = useState({ title: "", description: "", priority: "MEDIUM", changeType: "NORMAL", risk: "MEDIUM", impact: "MEDIUM", plannedStart: "", plannedEnd: "", implementationPlan: "", rollbackPlan: "", testPlan: "" });
+  const [configurationItem, setConfigurationItem] = useState<ConfigurationItem | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      onCreated(await api.createChange(token, { ...form, plannedStart: form.plannedStart || undefined, plannedEnd: form.plannedEnd || undefined }));
+      onCreated(await api.createChange(token, { ...form, configurationItemId: configurationItem?.id, plannedStart: form.plannedStart || undefined, plannedEnd: form.plannedEnd || undefined }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create change");
     } finally { setBusy(false); }
@@ -384,6 +569,7 @@ function CreateChange({ token, onCreated, onClose }: { token: string; onCreated:
         <div className="modal-head"><div><p className="eyebrow">CHANGE MANAGEMENT</p><h2>Create change</h2></div><button type="button" className="icon-button" onClick={onClose}>{"\u00d7"}</button></div>
         <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} minLength={3} maxLength={200} required autoFocus /></label>
         <label>Description<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></label>
+        <ConfigurationItemPicker token={token} selected={configurationItem} onSelect={setConfigurationItem} />
         <div className="form-grid">
           <label>Type<select value={form.changeType} onChange={(e) => setForm({ ...form, changeType: e.target.value })}>{["STANDARD","NORMAL","EMERGENCY"].map((x)=><option key={x}>{x}</option>)}</select></label>
           <label>Risk<select value={form.risk} onChange={(e) => setForm({ ...form, risk: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label>
@@ -393,7 +579,7 @@ function CreateChange({ token, onCreated, onClose }: { token: string; onCreated:
           <label>Planned end<input type="datetime-local" value={form.plannedEnd} onChange={(e) => setForm({ ...form, plannedEnd: e.target.value })} /></label>
         </div>
         <label>Implementation plan<textarea value={form.implementationPlan} onChange={(e) => setForm({ ...form, implementationPlan: e.target.value })} rows={3} /></label>
-        <label>Backout plan<textarea value={form.backoutPlan} onChange={(e) => setForm({ ...form, backoutPlan: e.target.value })} rows={3} /></label>
+        <label>Rollback plan<textarea value={form.rollbackPlan} onChange={(e) => setForm({ ...form, rollbackPlan: e.target.value })} rows={3} /></label>
         <label>Test plan<textarea value={form.testPlan} onChange={(e) => setForm({ ...form, testPlan: e.target.value })} rows={3} /></label>
         {error && <div className="error">{error}</div>}
         <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Creating..." : "Create change"}</button></div>
@@ -422,7 +608,6 @@ function IncidentDetail({
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
   const [form, setForm] = useState({
     title: incident.title,
     description: incident.description || "",
@@ -431,6 +616,7 @@ function IncidentDetail({
     urgency: incident.incident?.urgency || "LOW",
     affectedService: incident.incident?.affectedService || "",
   });
+  const [configurationItem, setConfigurationItem] = useState<ConfigurationItem | null>(incident.configurationItem || null);
   const [groupId, setGroupId] = useState(
     incident.assignmentGroup?.id || groups[0]?.id || "",
   );
@@ -439,9 +625,10 @@ function IncidentDetail({
   const [status, setStatus] = useState(incident.status?.name || "OPEN");
   const [resolution, setResolution] = useState("");
   const [success, setSuccess] = useState("");
-  const [activeTab, setActiveTab] = useState<"work-notes" | "related" | "attachments">(
+  const [activeTab, setActiveTab] = useState<"work-notes" | "related">(
     "work-notes",
   );
+  const [showAttachments, setShowAttachments] = useState(false);
   const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
   const [relatedNumber, setRelatedNumber] = useState("");
   const [relationType, setRelationType] = useState("CHILD_INCIDENT");
@@ -454,7 +641,7 @@ function IncidentDetail({
     setError("");
     setSuccess("");
     try {
-      onUpdated(await api.updateIncident(token, incident.id, form));
+      onUpdated(await api.updateIncident(token, incident.id, { ...form, configurationItemId: configurationItem?.id ?? null }));
       setEditing(false);
       setSuccess("Incident details updated.");
     } catch (reason) {
@@ -580,12 +767,8 @@ function IncidentDetail({
       : `${minutes}m remaining`;
   };
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <section className={`modal detail-modal prb-detail-modal ${fullscreen ? "fullscreen" : ""}`}>
-        <div className="modal-head">
+      <section className="record-page record-form-modal incident-detail-page">
+        <div className="modal-head record-head">
           <div>
             <p className="eyebrow">{incident.ticketNumber}</p>
             <h2>{editing ? "Edit incident" : incident.title}</h2>
@@ -596,6 +779,10 @@ function IncidentDetail({
                 Edit
               </button>
             )}
+            {attachmentConfig?.enabled && <button type="button" className="icon-button attachment-icon" title={`Attachments (${attachments.length})`} onClick={() => setShowAttachments((value) => !value)}>📎</button>}
+            <button type="button" className="secondary" onClick={onClose}>
+              Back to queue
+            </button>
             <button type="button" className="icon-button" onClick={onClose}>
               ×
             </button>
@@ -647,6 +834,7 @@ function IncidentDetail({
                 }
               />
             </label>
+            <ConfigurationItemPicker token={token} selected={configurationItem} onSelect={setConfigurationItem} />
             {error && <div className="error">{error}</div>}
             <div className="modal-actions">
               <button className="secondary" onClick={() => setEditing(false)}>
@@ -685,6 +873,7 @@ function IncidentDetail({
                 <b>{incident.assignedTo?.name || "Unassigned"}</b>
               </div>
             </div>
+            {showAttachments && <div className="detail-section attachment-popover-panel"><AttachmentPanel attachments={attachments} enabled={attachmentConfig?.enabled} maxFileSizeMb={attachmentConfig?.maxFileSizeMb} busy={busy} onUpload={uploadAttachment} onDownload={(item)=>api.downloadAttachment(token,incident.id,item.id,item.fileName)} onDelete={deleteAttachment} /></div>}
             <div className="detail-section">
               <h3>Description</h3>
               <p>{incident.description || "No description provided."}</p>
@@ -702,8 +891,12 @@ function IncidentDetail({
                     <dd>{incident.incident?.impact || "—"}</dd>
                     <dt>Urgency</dt>
                     <dd>{incident.incident?.urgency || "—"}</dd>
-                    <dt>Reported by</dt>
+                    <dt>Opened by</dt>
                     <dd>{incident.createdBy.name}</dd>
+                    <dt>Created for</dt>
+                    <dd>{incident.incident?.createdFor?.name || incident.createdBy.name}</dd>
+                    <dt>Configuration Item</dt>
+                    <dd>{incident.configurationItem?.name || "Not linked"}</dd>
                     <dt>Created</dt>
                     <dd>{new Date(incident.createdAt).toLocaleString()}</dd>
                   </dl>
@@ -846,7 +1039,6 @@ function IncidentDetail({
                     Related Items
                   </button>
                 )}
-                {attachmentConfig?.enabled && <button className={activeTab === "attachments" ? "active" : ""} onClick={() => setActiveTab("attachments")}>Attachments <span>{attachments.length}</span></button>}
               </div>
               {activeTab === "work-notes" ? (
                 <>
@@ -901,6 +1093,7 @@ function IncidentDetail({
                       <option value="CHILD_INCIDENT">Child incident</option>
                       <option value="RELATED_CHANGE">Related change</option>
                       <option value="RELATED_PROBLEM">Related problem</option>
+                      <option value="CAUSED_BY_CHANGE">Caused by change</option>
                     </select>
                     <input
                       value={relatedNumber}
@@ -925,20 +1118,19 @@ function IncidentDetail({
                           <span>{item.title}</span>
                           <span className="badge">{item.status}</span>
                           <small>
-                            {item.relationshipType.replaceAll("_", " ")}
+                            {relationshipLabel(item.relationshipType)}
                           </small>
                         </article>
                       ))}
                     </div>
                   )}
                 </div>
-              ) : <div className="attachment-panel"><label className="attachment-upload">Add attachment <small>Maximum {attachmentConfig?.maxFileSizeMb||10} MB</small><input type="file" disabled={busy} onChange={e=>{void uploadAttachment(e.target.files?.[0]);e.target.value=''}}/></label>{attachments.length===0?<p className="muted">No attachments yet.</p>:<div className="attachment-list">{attachments.map(item=><article key={item.id}><div><b>{item.fileName}</b><small>{(item.sizeBytes/1024).toFixed(1)} KB · {item.uploadedBy.name} · {new Date(item.createdAt).toLocaleString()}</small></div><button className="secondary small" onClick={()=>api.downloadAttachment(token,incident.id,item.id,item.fileName)}>Download</button><button className="icon-button danger" title="Delete attachment" onClick={()=>deleteAttachment(item.id)}>×</button></article>)}</div>}</div>}
+              ) : null}
               {error && <div className="error">{error}</div>}
             </div>
           </>
         )}
       </section>
-    </div>
   );
 }
 
@@ -950,6 +1142,7 @@ function ServiceRequestDetail({
   groups,
   currentUserId,
   onUpdated,
+  onOpenTask,
   onClose,
 }: {
   request: Incident;
@@ -959,19 +1152,19 @@ function ServiceRequestDetail({
   groups: AssignmentGroup[];
   currentUserId: string;
   onUpdated: (value: Incident) => void;
+  onOpenTask: (task: RequestTask) => void;
   onClose: () => void;
 }) {
   const [status, setStatus] = useState(request.status?.name || "OPEN");
   const [groupId, setGroupId] = useState(request.assignmentGroup?.id || groups[0]?.id || "");
   const [assigneeId, setAssigneeId] = useState(request.assignedTo?.id || "");
   const [note, setNote] = useState("");
-  const [taskEdits, setTaskEdits] = useState<Record<string, { status: string; assignmentGroupId: string; assignedToId: string }>>({});
-  const [activeTab, setActiveTab] = useState<"work-notes" | "approvals" | "tasks" | "attachments">("work-notes");
+  const [activeTab, setActiveTab] = useState<"work-notes" | "approvals" | "tasks">("work-notes");
+  const [showAttachments, setShowAttachments] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
   const selectedGroup = groups.find((group) => group.id === groupId);
   const approvals = request.serviceRequest?.approvals || [];
   const tasks = request.serviceRequest?.tasks || [];
@@ -980,121 +1173,445 @@ function ServiceRequestDetail({
   async function decideApproval(approvalId: string, decision: "APPROVED" | "REJECTED") { setBusy(true); setError(""); try { onUpdated(await api.decideServiceApproval(token, request.id, approvalId, { decision })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update approval"); } finally { setBusy(false); } }
   async function assign() { if (!groupId || !assigneeId) return; setBusy(true); setError(""); try { onUpdated(await api.assignServiceRequest(token, request.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
   async function addNote() { if (!note.trim()) return; setBusy(true); setError(""); try { await api.addServiceRequestActivity(token, request.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.serviceRequests(token); const value = refreshed.find((item) => item.id === request.id); if (value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
-  async function updateTask(taskId: string) { const value = taskEdits[taskId]; if (!value) return; setBusy(true); setError(""); try { onUpdated(await api.updateServiceRequestTask(token, request.id, taskId, { status: value.status, assignmentGroupId: value.assignmentGroupId || undefined, assignedToId: value.assignedToId || undefined })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update task"); } finally { setBusy(false); } }
   async function loadAttachments() { try { setAttachments(await api.attachments(token, request.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load attachments"); } }
   async function uploadAttachment(file?: File) { if(!file)return;setBusy(true);setError("");try{await api.uploadAttachment(token,request.id,file);await loadAttachments();}catch(reason){setError(reason instanceof Error?reason.message:"Could not upload attachment")}finally{setBusy(false)} }
   async function deleteAttachment(id:string) { setBusy(true);try{await api.deleteAttachment(token,request.id,id);await loadAttachments();}catch(reason){setError(reason instanceof Error?reason.message:"Could not delete attachment")}finally{setBusy(false)} }
   useEffect(() => { api.attachmentConfiguration(token).then(value=>{setAttachmentConfig(value);if(value.enabled)void loadAttachments()}).catch(()=>setAttachmentConfig(null)); }, [token,request.id]);
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <section className={`modal detail-modal record-form-modal ${fullscreen ? "fullscreen" : ""}`}>
+      <section className="record-page record-form-modal sr-detail-page">
         <div className="modal-head record-head">
           <div><p className="eyebrow">{request.ticketNumber}</p><h2>{request.title}</h2></div>
-          <div className="modal-head-actions"><button type="button" className="icon-button" title={fullscreen ? "Exit full screen" : "Full screen"} onClick={() => setFullscreen((value) => !value)}>{"\u2197"}</button><button type="button" className="icon-button" title="Close" onClick={onClose}>{"\u00d7"}</button></div>
+          <div className="modal-head-actions">{attachmentConfig?.enabled && <button type="button" className="icon-button attachment-icon" title={`Attachments (${attachments.length})`} onClick={() => setShowAttachments((value) => !value)}>📎</button>}<button type="button" className="secondary" onClick={onClose}>Back to queue</button></div>
         </div>
         {error && <div className="error">{error}</div>}
         <div className="detail-section request-description"><h3>Description</h3><p>{request.description || "No description provided."}</p></div>
-        <div className="record-two-column">
-          <div className="record-main-stack">
-            <div className="detail-section compact-fields"><h3>Request information</h3><dl><dt>Created</dt><dd>{new Date(request.createdAt).toLocaleString()}</dd><dt>Status</dt><dd><span className={`badge ${(request.status?.name || "OPEN").toLowerCase()}`}>{(request.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Catalogue Item</dt><dd>{request.serviceRequest?.catalogItem?.name || "Service request"}</dd><dt>Requested By</dt><dd>{request.createdBy.name}</dd></dl></div>
-          </div>
-          <aside className="record-side-stack">
-            <div className="detail-section"><h3>Assignment</h3>{canEdit ? <div className="assignment-row stacked"><select value={groupId} onChange={(e) => { setGroupId(e.target.value); setAssigneeId(""); }}><option value="">Select group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select><button className="secondary" onClick={assign} disabled={!groupId || !assigneeId || busy}>Assign</button></div> : <dl><dt>Group</dt><dd>{request.assignmentGroup?.name || "Unassigned"}</dd><dt>Assignee</dt><dd>{request.assignedTo?.name || "Unassigned"}</dd></dl>}</div>
-            {canEdit && <div className="detail-section"><h3>Status</h3><div className="status-row"><select value={status} onChange={(e) => setStatus(e.target.value)} disabled={request.status?.name === "CLOSED" && !canReopen}>{["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"].map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select><button className="secondary" onClick={updateStatus} disabled={busy || (request.status?.name === "CLOSED" && !canReopen)}>Update</button></div>{request.status?.name === "CLOSED" && !canReopen && <p className="muted">Only an administrator can reopen a closed ticket.</p>}</div>}
-          </aside>
+        <div className="service-request-full-view">
+          <div className="detail-section compact-fields"><h3>Request information</h3><dl><dt>Created</dt><dd>{new Date(request.createdAt).toLocaleString()}</dd><dt>Status</dt><dd><span className={`badge ${(request.status?.name || "OPEN").toLowerCase()}`}>{(request.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Catalogue Item</dt><dd>{request.serviceRequest?.catalogItem?.name || "Service request"}</dd><dt>Opened by</dt><dd>{request.createdBy.name}</dd><dt>Created for</dt><dd>{request.serviceRequest?.requestedFor?.name || request.createdBy.name}</dd></dl></div>
+          <div className="detail-section service-request-controls"><h3>Fulfilment</h3><div className="service-request-control-grid"><div><h4>Assignment</h4>{canEdit ? <div className="assignment-row stacked"><select value={groupId} onChange={(e) => { setGroupId(e.target.value); setAssigneeId(""); }}><option value="">Select group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select><button className="secondary" onClick={assign} disabled={!groupId || !assigneeId || busy}>Assign</button></div> : <dl className="compact-fields"><dt>Group</dt><dd>{request.assignmentGroup?.name || "Unassigned"}</dd><dt>Assignee</dt><dd>{request.assignedTo?.name || "Unassigned"}</dd></dl>}</div>{canEdit && <div><h4>Status</h4><div className="status-row"><select value={status} onChange={(e) => setStatus(e.target.value)} disabled={request.status?.name === "CLOSED" && !canReopen}>{["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"].map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select><button className="secondary" onClick={updateStatus} disabled={busy || (request.status?.name === "CLOSED" && !canReopen)}>Update</button></div>{request.status?.name === "CLOSED" && !canReopen && <p className="muted">Only an administrator can reopen a closed ticket.</p>}</div>}</div></div>
         </div>
         {request.slas?.length > 0 && <div className="detail-section"><h3>SLA</h3>{request.slas.map((sla) => <div className="ticket-sla" key={sla.id}><div><b>{sla.definitionName}</b><span className={`badge ${sla.status.toLowerCase()}`}>{sla.status.replace("_", " ")}</span></div><small>Response due {new Date(sla.responseDueAt).toLocaleString()}</small><small>Resolution due {new Date(sla.resolutionDueAt).toLocaleString()}</small></div>)}</div>}
+        {showAttachments && <div className="detail-section attachment-popover-panel"><AttachmentPanel attachments={attachments} enabled={attachmentConfig?.enabled} maxFileSizeMb={attachmentConfig?.maxFileSizeMb} busy={busy} onUpload={uploadAttachment} onDownload={(item)=>api.downloadAttachment(token,request.id,item.id,item.fileName)} onDelete={deleteAttachment} /></div>}
         <div className="detail-section record-tab-shell">
-          <div className="record-tabs"><button className={activeTab === "work-notes" ? "active" : ""} onClick={() => setActiveTab("work-notes")}>{canEdit ? "Work Notes" : "Comments"}</button><button className={activeTab === "approvals" ? "active" : ""} onClick={() => setActiveTab("approvals")}>Approvals <span>{approvals.length}</span></button><button className={activeTab === "tasks" ? "active" : ""} onClick={() => setActiveTab("tasks")}>Tasks <span>{tasks.length}</span></button>{attachmentConfig?.enabled && <button className={activeTab === "attachments" ? "active" : ""} onClick={() => setActiveTab("attachments")}>Attachments <span>{attachments.length}</span></button>}</div>
+          <div className="record-tabs"><button className={activeTab === "work-notes" ? "active" : ""} onClick={() => setActiveTab("work-notes")}>{canEdit ? "Work Notes" : "Comments"}</button><button className={activeTab === "approvals" ? "active" : ""} onClick={() => setActiveTab("approvals")}>Approvals <span>{approvals.length}</span></button><button className={activeTab === "tasks" ? "active" : ""} onClick={() => setActiveTab("tasks")}>Tasks <span>{tasks.length}</span></button></div>
           {activeTab === "work-notes" && <><div className="note-entry"><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."} /><button className="primary" onClick={addNote} disabled={!note.trim() || busy}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{request.activities.length === 0 ? <p className="muted">No activity yet.</p> : request.activities.map((activity) => <article key={activity.id}><div><b>{activity.createdBy.name}</b><span className="activity-type">{activity.activityType?.name.replace("_", " ") || "ACTIVITY"}</span><time>{new Date(activity.createdAt).toLocaleString()}</time></div><p>{activity.comment}</p></article>)}</div></>}
           {activeTab === "approvals" && <div className="approval-step-list">{approvals.length === 0 ? <p className="muted">No approvals required for this request.</p> : approvals.map((approval) => <article key={approval.id}><b>Step {approval.sequence}</b><div><strong>{approval.approvalType.replace("_", " ")}</strong><small>{approval.approver?.name || "Approver pending"}</small></div>{approval.status === "PENDING" && (canEdit || approval.approver?.id === currentUserId) ? <span className="approval-actions"><button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "APPROVED")}>Approve</button><button className="secondary small" disabled={busy} onClick={() => decideApproval(approval.id, "REJECTED")}>Reject</button></span> : <span className={`badge ${approval.status.toLowerCase()}`}>{approval.status}</span>}</article>)}</div>}
-          {activeTab === "tasks" && <div className="related-list task-card-list">{tasks.length === 0 ? <p className="muted">No tasks created for this request.</p> : tasks.map((task) => { const edit = taskEdits[task.id] || { status: task.status, assignmentGroupId: task.assignmentGroup?.id || "", assignedToId: task.assignedTo?.id || "" }; const taskGroup = groups.find((group) => group.id === edit.assignmentGroupId); return <article key={task.id}><button className="link-button task-number-link" type="button">{task.taskNumber}</button><div><strong>{task.title}</strong>{task.description && <small>{task.description}</small>}<small>{task.assignmentGroup?.name || "No group"} - {task.assignedTo?.name || "Unassigned"}</small></div>{canEdit ? <div className="task-edit-row"><select value={edit.status} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, status: e.target.value } })}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={edit.assignmentGroupId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignmentGroupId: e.target.value, assignedToId: "" } })}><option value="">No group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select value={edit.assignedToId} onChange={(e) => setTaskEdits({ ...taskEdits, [task.id]: { ...edit, assignedToId: e.target.value } })}><option value="">Unassigned</option>{taskGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select><button className="secondary small" disabled={busy} onClick={() => updateTask(task.id)}>Save</button></div> : <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>}</article>; })}</div>}
-          {activeTab === "attachments" && <div className="attachment-panel"><label className="attachment-upload">Add attachment <small>Maximum {attachmentConfig?.maxFileSizeMb||10} MB</small><input type="file" disabled={busy} onChange={e=>{void uploadAttachment(e.target.files?.[0]);e.target.value=''}}/></label>{attachments.length===0?<p className="muted">No attachments yet.</p>:<div className="attachment-list">{attachments.map(item=><article key={item.id}><div><b>{item.fileName}</b><small>{(item.sizeBytes/1024).toFixed(1)} KB - {item.uploadedBy.name} - {new Date(item.createdAt).toLocaleString()}</small></div><button className="secondary small" onClick={()=>api.downloadAttachment(token,request.id,item.id,item.fileName)}>Download</button><button className="icon-button danger" title="Delete attachment" onClick={()=>deleteAttachment(item.id)}>{"\u00d7"}</button></article>)}</div>}</div>}
+          {activeTab === "tasks" && <div className="request-task-list">{tasks.length === 0 ? <p className="muted">No tasks created for this request.</p> : tasks.map((task) => <article key={task.id}><div className="request-task-summary"><div><button className="link-button task-number-link" type="button" onClick={() => onOpenTask(task)}>{task.taskNumber}</button><small>{task.description || task.title}</small></div><div className="request-task-meta"><span className={`badge ${task.status.toLowerCase()}`}>{task.status.replaceAll("_", " ")}</span><small>{task.assignmentGroup?.name || "No group"}</small><small>{task.assignedTo?.name || "Unassigned"}</small></div></div></article>)}</div>}
         </div>
       </section>
-    </div>
   );
 }
 
-function ProblemDetail({ problem, token, canEdit, canReopen, groups, onUpdated, onClose }: { problem: Incident; token: string; canEdit: boolean; canReopen: boolean; groups: AssignmentGroup[]; onUpdated: (value: Incident) => void; onClose: () => void }) {
-  const [form, setForm] = useState({ title: problem.title, description: problem.description || "", priority: problem.priority?.name || "MEDIUM", rootCause: problem.problem?.rootCause || "", workaround: problem.problem?.workaround || "", permanentFix: problem.problem?.permanentFix || "", knownError: problem.problem?.knownError || false });
+function RequestTaskDetail({ task, request, token, canEdit, groups, onUpdated, onOpenRequest, onClose }: { task: RequestTask; request: Incident; token: string; canEdit: boolean; groups: AssignmentGroup[]; onUpdated: (value: Incident) => void; onOpenRequest: () => void; onClose: () => void }) {
+  const [edit, setEdit] = useState({ title: task.title, description: task.description || "", status: task.status, assignmentGroupId: task.assignmentGroup?.id || "", assignedToId: task.assignedTo?.id || "" });
+  const [workNote, setWorkNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const selectedGroup = groups.find((group) => group.id === edit.assignmentGroupId);
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated(await api.updateServiceRequestTask(token, request.id, task.id, {
+        title: edit.title,
+        description: edit.description,
+        status: edit.status,
+        assignmentGroupId: edit.assignmentGroupId || undefined,
+        assignedToId: edit.assignedToId || undefined,
+      }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update task");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function addTaskNote() {
+    if (!workNote.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      onUpdated(await api.updateServiceRequestTask(token, request.id, task.id, { workNote }));
+      setWorkNote("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not add task work note");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+      <section className="record-page record-form-modal sr-task-page">
+        <div className="modal-head record-head">
+          <div>
+            <p className="eyebrow">{task.taskNumber}</p>
+            <h2>{task.title}</h2>
+          </div>
+          <button type="button" className="secondary" onClick={onClose}>Back to queue</button>
+        </div>
+        <div className="parent-record-link">
+          <span>Parent request</span>
+          <button type="button" className="link-button" onClick={onOpenRequest}>{request.ticketNumber} - {request.title}</button>
+        </div>
+        {error && <div className="error">{error}</div>}
+        <div className="detail-section">
+          <h3>Task details</h3>
+          {canEdit ? (
+            <div className="task-form-grid">
+              <label>Short description<input value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
+              <label>Description<textarea rows={4} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></label>
+            </div>
+          ) : <p>{task.description || "No description provided."}</p>}
+        </div>
+        <div className="detail-section">
+          <h3>Current state</h3>
+          {canEdit ? (
+            <div className="task-state-grid">
+              <div className="task-state-column">
+                <label>Status<select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select></label>
+                <div><span>Created</span><strong>{new Date(task.createdAt).toLocaleString()}</strong></div>
+              </div>
+              <div className="task-state-column">
+                <label>Assignment group<select value={edit.assignmentGroupId} onChange={(e) => setEdit({ ...edit, assignmentGroupId: e.target.value, assignedToId: "" })}><option value="">No group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                <label>Assigned to<select value={edit.assignedToId} onChange={(e) => setEdit({ ...edit, assignedToId: e.target.value })}><option value="">Unassigned</option>{selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select></label>
+              </div>
+              <button className="primary" disabled={busy} onClick={save}>Save task</button>
+            </div>
+          ) : (
+            <dl className="compact-fields">
+              <dt>Status</dt><dd><span className={`badge ${task.status.toLowerCase()}`}>{task.status.replaceAll("_", " ")}</span></dd>
+              <dt>Assignment Group</dt><dd>{task.assignmentGroup?.name || "No group"}</dd>
+              <dt>Assigned To</dt><dd>{task.assignedTo?.name || "Unassigned"}</dd>
+              <dt>Created</dt><dd>{new Date(task.createdAt).toLocaleString()}</dd>
+            </dl>
+          )}
+        </div>
+        <div className="detail-section">
+          <h3>Work notes</h3>
+          <div className="note-entry">
+            <textarea rows={3} value={workNote} onChange={(e) => setWorkNote(e.target.value)} placeholder="Add a task work note. It will also appear on the parent request." />
+            <button className="primary" disabled={!workNote.trim() || busy} onClick={addTaskNote}>Add work note</button>
+          </div>
+          <p className="muted">Task notes are stored on the parent service request with the task number.</p>
+          <div className="activity-list task-note-list">
+            {request.activities.filter((activity) => activity.comment.startsWith(`${task.taskNumber}:`)).length === 0 ? (
+              <p className="muted">No task work notes yet.</p>
+            ) : (
+              request.activities
+                .filter((activity) => activity.comment.startsWith(`${task.taskNumber}:`))
+                .map((activity) => (
+                  <article key={activity.id}>
+                    <div>
+                      <b>{activity.createdBy.name}</b>
+                      <span className="activity-type">TASK WORK NOTE</span>
+                      <time>{new Date(activity.createdAt).toLocaleString()}</time>
+                    </div>
+                    <p>{activity.comment.replace(`${task.taskNumber}:`, "").trim()}</p>
+                  </article>
+                ))
+            )}
+          </div>
+        </div>
+      </section>
+  );
+}
+
+function ProblemDetail({ problem, token, canEdit, canReopen, groups, onUpdated, onClose, onOpenTask, onOpenIncident }: { problem: Incident; token: string; canEdit: boolean; canReopen: boolean; groups: AssignmentGroup[]; onUpdated: (value: Incident) => void; onClose: () => void; onOpenTask: (task: ProblemTask) => void; onOpenIncident: (ticketId: string) => void }) {
+  const [form, setForm] = useState({ title: problem.title, description: problem.description || "", priority: problem.priority?.name || "MEDIUM", impact: problem.problem?.impact || "MEDIUM", risk: problem.problem?.risk || "MEDIUM", rootCause: problem.problem?.rootCause || "", workaround: problem.problem?.workaround || "", permanentFix: problem.problem?.permanentFix || "", knownError: problem.problem?.knownError || false });
+  const [configurationItem, setConfigurationItem] = useState<ConfigurationItem | null>(problem.configurationItem || null);
   const [status, setStatus] = useState(problem.status?.name || "OPEN");
   const [groupId, setGroupId] = useState(problem.assignmentGroup?.id || groups[0]?.id || "");
   const [assigneeId, setAssigneeId] = useState(problem.assignedTo?.id || "");
   const [note, setNote] = useState("");
   const [activeTab, setActiveTab] = useState<"work-notes" | "tasks" | "related" | "risk">("work-notes");
+  const [showAttachments, setShowAttachments] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
   const [taskDraft, setTaskDraft] = useState({ title: "", description: "", assignmentGroupId: "", assignedToId: "" });
-  const [taskEdits, setTaskEdits] = useState<Record<string, { status: string; assignmentGroupId: string; assignedToId: string }>>({});
-  const [selectedTaskId, setSelectedTaskId] = useState("");
   const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
   const [relatedNumber, setRelatedNumber] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
   const selectedGroup = groups.find((group) => group.id === groupId);
   const activities = [...problem.activities].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const tasks = problem.problem?.tasks || [];
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) || tasks[0];
   const fieldValue = (value?: string | null) => value?.trim() || "Not documented";
-  async function save() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateProblem(token, problem.id, form)); setSuccess("Problem details updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem"); } finally { setBusy(false); } }
+  async function save() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateProblem(token, problem.id, { ...form, configurationItemId: configurationItem?.id ?? null })); setSuccess("Problem details updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem"); } finally { setBusy(false); } }
   async function updateStatus() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.changeProblemStatus(token, problem.id, status)); setSuccess("Status updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update status"); } finally { setBusy(false); } }
   async function assign() { if(!groupId||!assigneeId)return; setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.assignProblem(token, problem.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); setSuccess("Assignment updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
   async function addNote() { if(!note.trim())return; setBusy(true); setError(""); try { await api.addProblemActivity(token, problem.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.problems(token); const value = refreshed.find((item)=>item.id===problem.id); if(value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
-  async function createTask() { if(!taskDraft.title.trim())return; setBusy(true); setError(""); setSuccess(""); try { const updated = await api.createProblemTask(token, problem.id, { ...taskDraft, assignmentGroupId: taskDraft.assignmentGroupId || undefined, assignedToId: taskDraft.assignedToId || undefined }); onUpdated(updated); setSelectedTaskId(updated.problem?.tasks?.at(-1)?.id || ""); setTaskDraft({ title: "", description: "", assignmentGroupId: "", assignedToId: "" }); setSuccess("PTask opened."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create problem task"); } finally { setBusy(false); } }
-  async function updateTask(taskId: string) { const value = taskEdits[taskId]; if(!value)return; setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateProblemTask(token, problem.id, taskId, { status: value.status, assignmentGroupId: value.assignmentGroupId || undefined, assignedToId: value.assignedToId || undefined })); setSuccess("PTask updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update problem task"); } finally { setBusy(false); } }
+  async function createTask() { if(!taskDraft.title.trim())return; setBusy(true); setError(""); setSuccess(""); try { const updated = await api.createProblemTask(token, problem.id, { ...taskDraft, assignmentGroupId: taskDraft.assignmentGroupId || undefined, assignedToId: taskDraft.assignedToId || undefined }); onUpdated(updated); setTaskDraft({ title: "", description: "", assignmentGroupId: "", assignedToId: "" }); setSuccess("PTask opened."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create problem task"); } finally { setBusy(false); } }
   async function loadRelated() { try { setRelatedItems(await api.relatedItems(token, problem.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load related incidents"); } }
+  async function loadAttachments() { try { setAttachments(await api.attachments(token, problem.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load attachments"); } }
+  async function uploadAttachment(file?: File) { if(!file)return;setBusy(true);setError("");try{await api.uploadAttachment(token,problem.id,file);await loadAttachments();setSuccess("Attachment uploaded.");}catch(reason){setError(reason instanceof Error?reason.message:"Could not upload attachment")}finally{setBusy(false)} }
+  async function deleteAttachment(id:string) { setBusy(true);try{await api.deleteAttachment(token,problem.id,id);await loadAttachments();setSuccess("Attachment deleted.");}catch(reason){setError(reason instanceof Error?reason.message:"Could not delete attachment")}finally{setBusy(false)} }
   async function addRelated() { if(!relatedNumber.trim())return; setBusy(true); setError(""); setSuccess(""); try { await api.addRelatedItem(token, problem.id, { relatedTicketNumber: relatedNumber, relationshipType: "CHILD_INCIDENT" }); setRelatedNumber(""); await loadRelated(); setSuccess("Related incident linked."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not link related incident"); } finally { setBusy(false); } }
-  useEffect(() => { if(activeTab === "related") void loadRelated(); }, [activeTab, problem.id]);
-  useEffect(() => { if(!selectedTaskId && tasks.length) setSelectedTaskId(tasks[0].id); }, [problem.id, tasks.length]);
-  return <div className="modal-backdrop" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><section className={`modal detail-modal record-form-modal ${fullscreen ? "fullscreen" : ""}`}>
-    <div className="modal-head record-head"><div><p className="eyebrow">{problem.ticketNumber}</p><h2>{problem.title}</h2><p className="muted">{problem.title}</p></div><div className="modal-head-actions"><button type="button" className="icon-button" title={fullscreen ? "Exit full screen" : "Full screen"} onClick={() => setFullscreen((value) => !value)}>{"\u2197"}</button><button type="button" className="icon-button" title="Close" onClick={onClose}>{"\u00d7"}</button></div></div>
+  useEffect(() => { void loadRelated(); }, [problem.id]);
+  useEffect(() => { api.attachmentConfiguration(token).then(value=>{setAttachmentConfig(value);if(value.enabled)void loadAttachments()}).catch(()=>setAttachmentConfig(null)); }, [token,problem.id]);
+  return <section className="record-page record-form-modal problem-detail-page">
+    <div className="modal-head record-head"><div><p className="eyebrow">{problem.ticketNumber}</p><h2>{problem.title}</h2></div><div className="modal-head-actions">{attachmentConfig?.enabled && <button type="button" className="icon-button attachment-icon" title={`Attachments (${attachments.length})`} onClick={() => setShowAttachments((value) => !value)}>📎</button>}<button type="button" className="secondary" onClick={onClose}>Back to queue</button></div></div>
     {success&&<div className="success">{success}</div>}{error&&<div className="error">{error}</div>}
+    {showAttachments && <div className="detail-section attachment-popover-panel"><AttachmentPanel attachments={attachments} enabled={attachmentConfig?.enabled} maxFileSizeMb={attachmentConfig?.maxFileSizeMb} busy={busy} onUpload={uploadAttachment} onDownload={(item)=>api.downloadAttachment(token,problem.id,item.id,item.fileName)} onDelete={deleteAttachment} /></div>}
     <div className="record-two-column">
-      <div className="record-main-stack"><div className="detail-section problem-form-fields"><h3>Problem details</h3>{canEdit ? <><label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea rows={4} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label><label>Impact<textarea rows={3} disabled placeholder="Impact field will be added with PRB risk fields."/></label><label>Root Cause<textarea rows={4} value={form.rootCause} onChange={(e)=>setForm({...form,rootCause:e.target.value})}/></label><label>Workaround<textarea rows={3} value={form.workaround} onChange={(e)=>setForm({...form,workaround:e.target.value})}/></label><label>Permanent Fix<textarea rows={4} value={form.permanentFix} onChange={(e)=>setForm({...form,permanentFix:e.target.value})}/></label><label className="check-row"><input type="checkbox" checked={form.knownError} onChange={(e)=>setForm({...form,knownError:e.target.checked})}/>Risk accepted</label><button className="primary" disabled={busy} onClick={save}>Save problem</button></> : <dl className="compact-fields"><dt>Description</dt><dd>{fieldValue(problem.description)}</dd><dt>Impact</dt><dd>Not documented</dd><dt>Root Cause</dt><dd>{fieldValue(problem.problem?.rootCause)}</dd><dt>Workaround</dt><dd>{fieldValue(problem.problem?.workaround)}</dd><dt>Permanent Fix</dt><dd>{fieldValue(problem.problem?.permanentFix)}</dd><dt>Risk Accepted</dt><dd>{problem.problem?.knownError ? "Yes" : "No"}</dd></dl>}</div></div>
-      <aside className="record-side-stack"><div className="detail-section compact-fields"><h3>Record info</h3><dl><dt>Created By</dt><dd>{problem.createdBy.name}</dd><dt>Opened On</dt><dd>{new Date(problem.createdAt).toLocaleString()}</dd><dt>Priority</dt><dd>{problem.priority?.name || form.priority}</dd><dt>Status</dt><dd><span className={`badge ${(problem.status?.name || "OPEN").toLowerCase()}`}>{(problem.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Problem Type</dt><dd>Reactive</dd><dt>Configuration Item</dt><dd>Not linked</dd></dl></div>{canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}{canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="AWAITING_CUSTOMER">Awaiting customer</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{problem.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an administrator can reopen a closed problem.</p>}</div>}</aside>
+      <div className="record-main-stack"><div className="detail-section problem-form-fields"><h3>Problem details</h3>{canEdit ? <><label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea rows={4} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label><ConfigurationItemPicker token={token} selected={configurationItem} onSelect={setConfigurationItem} /><div className="form-grid"><label>Impact<select value={form.impact} onChange={(e)=>setForm({...form,impact:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Risk<select value={form.risk} onChange={(e)=>setForm({...form,risk:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label></div><label>Root Cause<textarea rows={4} value={form.rootCause} onChange={(e)=>setForm({...form,rootCause:e.target.value})}/></label><label>Workaround<textarea rows={3} value={form.workaround} onChange={(e)=>setForm({...form,workaround:e.target.value})}/></label><label>Permanent Fix<textarea rows={4} value={form.permanentFix} onChange={(e)=>setForm({...form,permanentFix:e.target.value})}/></label><label className="check-row"><input type="checkbox" checked={form.knownError} onChange={(e)=>setForm({...form,knownError:e.target.checked})}/>Risk accepted</label><button className="primary" disabled={busy} onClick={save}>Save problem</button></> : <dl className="compact-fields"><dt>Description</dt><dd>{fieldValue(problem.description)}</dd><dt>Configuration Item</dt><dd>{problem.configurationItem?.name || "Not linked"}</dd><dt>Impact</dt><dd>{problem.problem?.impact || "MEDIUM"}</dd><dt>Risk</dt><dd>{problem.problem?.risk || "MEDIUM"}</dd><dt>Root Cause</dt><dd>{fieldValue(problem.problem?.rootCause)}</dd><dt>Workaround</dt><dd>{fieldValue(problem.problem?.workaround)}</dd><dt>Permanent Fix</dt><dd>{fieldValue(problem.problem?.permanentFix)}</dd><dt>Risk Accepted</dt><dd>{problem.problem?.knownError ? "Yes" : "No"}</dd></dl>}</div></div>
+      <div className="record-side-stack"><div className="detail-section compact-fields"><h3>Record info</h3><dl><dt>Created By</dt><dd>{problem.createdBy.name}</dd><dt>Opened On</dt><dd>{new Date(problem.createdAt).toLocaleString()}</dd><dt>Priority</dt><dd>{problem.priority?.name || form.priority}</dd><dt>Status</dt><dd><span className={`badge ${(problem.status?.name || "OPEN").toLowerCase()}`}>{(problem.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Problem Type</dt><dd>Reactive</dd><dt>Configuration Item</dt><dd>{problem.configurationItem?.name || "Not linked"}</dd></dl></div>{canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}{canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}>{problemStatusOptions.map((value)=><option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{problem.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an IT Service Manager or administrator can reopen a closed problem.</p>}</div>}</div>
     </div>
     <div className="detail-section record-tab-shell"><div className="record-tabs"><button className={activeTab==="work-notes"?"active":""} onClick={()=>setActiveTab("work-notes")}>Work Notes</button><button className={activeTab==="tasks"?"active":""} onClick={()=>setActiveTab("tasks")}>Problem Tasks <span>{tasks.length}</span></button><button className={activeTab==="related"?"active":""} onClick={()=>setActiveTab("related")}>Related Incidents <span>{relatedItems.length}</span></button><button className={activeTab==="risk"?"active":""} onClick={()=>setActiveTab("risk")}>Risk</button></div>
       {activeTab==="work-notes"&&<><div className="note-entry"><textarea rows={3} value={note} onChange={(e)=>setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."}/><button className="primary" disabled={!note.trim()||busy} onClick={addNote}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{activities.length ? activities.map((a)=><article key={a.id}><div><b>{a.createdBy.name}</b><span className="activity-type">{a.activityType?.name?.replace("_", " ")||"ACTIVITY"}</span><time>{new Date(a.createdAt).toLocaleString()}</time></div><p>{a.comment}</p></article>) : <p className="muted">No activity yet.</p>}</div></>}
-      {activeTab==="tasks"&&<div className="problem-task-workspace">{canEdit&&<div className="admin-helper-grid"><input placeholder="Task title" value={taskDraft.title} onChange={(e)=>setTaskDraft({...taskDraft,title:e.target.value})}/><input placeholder="Task description" value={taskDraft.description} onChange={(e)=>setTaskDraft({...taskDraft,description:e.target.value})}/><select value={taskDraft.assignmentGroupId} onChange={(e)=>setTaskDraft({...taskDraft,assignmentGroupId:e.target.value,assignedToId:""})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><button className="secondary small" onClick={createTask} disabled={busy}>Open PTask</button></div>}{tasks.length ? <div className="problem-task-layout"><div className="problem-task-list">{tasks.map((task)=><button key={task.id} className={`problem-task-card ${selectedTask?.id===task.id?"active":""}`} type="button" onClick={()=>setSelectedTaskId(task.id)}><strong>{task.taskNumber}</strong><span>{task.title}</span><small>{task.status.replaceAll("_", " ")}</small></button>)}</div>{selectedTask&&(()=>{ const edit=taskEdits[selectedTask.id]||{status:selectedTask.status,assignmentGroupId:selectedTask.assignmentGroup?.id||"",assignedToId:selectedTask.assignedTo?.id||""}; const taskGroup=groups.find((g)=>g.id===edit.assignmentGroupId); return <div className="problem-task-detail"><div className="task-detail-head"><div><p className="eyebrow">{selectedTask.taskNumber}</p><h3>{selectedTask.title}</h3></div><span className={`badge ${selectedTask.status.toLowerCase()}`}>{selectedTask.status.replaceAll("_", " ")}</span></div>{selectedTask.description&&<p>{selectedTask.description}</p>}<dl className="compact-fields"><dt>Assignment Group</dt><dd>{selectedTask.assignmentGroup?.name||"No group"}</dd><dt>Assigned To</dt><dd>{selectedTask.assignedTo?.name||"Unassigned"}</dd><dt>Created</dt><dd>{new Date(selectedTask.createdAt).toLocaleString()}</dd></dl>{canEdit&&<div className="task-edit-row"><select value={edit.status} onChange={(e)=>setTaskEdits({...taskEdits,[selectedTask.id]:{...edit,status:e.target.value}})}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={edit.assignmentGroupId} onChange={(e)=>setTaskEdits({...taskEdits,[selectedTask.id]:{...edit,assignmentGroupId:e.target.value,assignedToId:""}})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={edit.assignedToId} onChange={(e)=>setTaskEdits({...taskEdits,[selectedTask.id]:{...edit,assignedToId:e.target.value}})}><option value="">Unassigned</option>{taskGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary small" onClick={()=>updateTask(selectedTask.id)} disabled={busy}>Save PTask</button></div>}</div>; })()}</div> : <p className="muted">No PTasks opened yet.</p>}</div>}
-      {activeTab==="related"&&<div className="related-panel">{canEdit&&<div className="related-entry"><input value={relatedNumber} onChange={(e)=>setRelatedNumber(e.target.value)} placeholder="Incident number, e.g. INC000001"/><button className="secondary" onClick={addRelated} disabled={!relatedNumber.trim()||busy}>Link child incident</button></div>}{relatedItems.length===0?<p className="muted">No related incidents linked.</p>:<div className="related-list">{relatedItems.filter((item)=>item.relationshipType==="CHILD_INCIDENT").map((item)=><article key={item.id}><button className="link-button task-number-link" type="button">{item.ticketNumber}</button><span>{item.title}</span><span className="badge">{item.status}</span><small>{new Date(item.createdAt).toLocaleString()}</small></article>)}</div>}</div>}
+      {activeTab==="tasks"&&<div className="problem-task-workspace">{canEdit&&<div className="admin-helper-grid"><input placeholder="Task title" value={taskDraft.title} onChange={(e)=>setTaskDraft({...taskDraft,title:e.target.value})}/><input placeholder="Task description" value={taskDraft.description} onChange={(e)=>setTaskDraft({...taskDraft,description:e.target.value})}/><select value={taskDraft.assignmentGroupId} onChange={(e)=>setTaskDraft({...taskDraft,assignmentGroupId:e.target.value,assignedToId:""})}><option value="">No group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><button className="secondary small" onClick={createTask} disabled={busy}>Open PTask</button></div>}{tasks.length ? <div className="request-task-list">{tasks.map((task)=><article key={task.id}><div className="request-task-summary"><div><button className="link-button task-number-link" type="button" onClick={()=>onOpenTask(task)}>{task.taskNumber}</button><small>{task.description || task.title}</small></div><div className="request-task-meta"><span className={`badge ${task.status.toLowerCase()}`}>{task.status.replaceAll("_", " ")}</span><small>{task.assignmentGroup?.name || "No group"}</small><small>{task.assignedTo?.name || "Unassigned"}</small></div></div></article>)}</div> : <p className="muted">No PTasks opened yet.</p>}</div>}
+      {activeTab==="related"&&<div className="related-panel">{canEdit&&<div className="related-entry"><input value={relatedNumber} onChange={(e)=>setRelatedNumber(e.target.value)} placeholder="Incident number, e.g. INC000001"/><button className="secondary" onClick={addRelated} disabled={!relatedNumber.trim()||busy}>Link child incident</button></div>}{relatedItems.filter((item)=>item.ticketType==="INCIDENT"||["CHILD_INCIDENT","PARENT_INCIDENT","RELATED_INCIDENT"].includes(item.relationshipType)).length===0?<p className="muted">No related incidents linked.</p>:<div className="related-list compact-related-list">{relatedItems.filter((item)=>item.ticketType==="INCIDENT"||["CHILD_INCIDENT","PARENT_INCIDENT","RELATED_INCIDENT"].includes(item.relationshipType)).map((item)=><article key={item.id}><button className="link-button task-number-link" type="button" onClick={()=>onOpenIncident(item.ticketId)}>{item.ticketNumber}</button><span>{item.title}</span><span className="badge">{item.status}</span><small>{item.assignmentGroup || "No group"}</small></article>)}</div>}</div>}
       {activeTab==="risk"&&<div className="risk-summary"><p className="muted">Risk Owner, Risk Accepted Till, and Risk Acceptance Summary will become editable after PRB risk fields are added to the database.</p></div>}
     </div>
-  </section></div>;
+  </section>;
+}
+
+function ProblemTaskDetail({ problem, task, token, groups, canEdit, onUpdated, onBackToProblem, onClose }: { problem: Incident; task: ProblemTask; token: string; groups: AssignmentGroup[]; canEdit: boolean; onUpdated: (value: Incident) => void; onBackToProblem: () => void; onClose: () => void }) {
+  const [edit, setEdit] = useState({ title: task.title, description: task.description || "", status: task.status, assignmentGroupId: task.assignmentGroup?.id || "", assignedToId: task.assignedTo?.id || "" });
+  const [workNote, setWorkNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const selectedGroup = groups.find((group) => group.id === edit.assignmentGroupId);
+  async function save(note?: string) {
+    setBusy(true); setError("");
+    try {
+      const updated = await api.updateProblemTask(token, problem.id, task.id, {
+        title: edit.title,
+        description: edit.description,
+        status: edit.status,
+        assignmentGroupId: edit.assignmentGroupId || undefined,
+        assignedToId: edit.assignedToId || undefined,
+        workNote: note?.trim() || undefined,
+      });
+      onUpdated(updated);
+      if (note) setWorkNote("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update problem task");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const taskNotes = problem.activities.filter((activity) => activity.comment.startsWith(`${task.taskNumber}:`));
+  return (
+    <section className="record-page record-form-modal sr-task-page">
+      <div className="modal-head record-head">
+        <div><p className="eyebrow">{task.taskNumber}</p><h2>{task.title}</h2><button className="link-button parent-record-link" type="button" onClick={onBackToProblem}>Parent problem: {problem.ticketNumber}</button></div>
+        <div className="modal-head-actions"><button type="button" className="secondary" onClick={onClose}>Back to queue</button></div>
+      </div>
+      {error && <div className="error">{error}</div>}
+      <div className="record-two-column">
+        <div className="record-main-stack">
+          <div className="detail-section task-form-grid">
+            <h3>Task details</h3>
+            {canEdit ? (
+              <>
+                <label>Short description<input value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
+                <label>Description<textarea rows={5} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></label>
+                <button className="primary" disabled={busy} onClick={() => save()}>Save task</button>
+              </>
+            ) : (
+              <dl className="compact-fields"><dt>Short description</dt><dd>{task.title}</dd><dt>Description</dt><dd>{task.description || "Not documented"}</dd></dl>
+            )}
+          </div>
+        </div>
+        <div className="record-side-stack">
+          <div className="detail-section">
+            <h3>Current state</h3>
+            {canEdit ? (
+              <div className="task-state-grid">
+                <label>Status<select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select></label>
+                <label>Created<input value={new Date(task.createdAt).toLocaleString()} readOnly /></label>
+                <label>Assignment group<select value={edit.assignmentGroupId} onChange={(e) => setEdit({ ...edit, assignmentGroupId: e.target.value, assignedToId: "" })}><option value="">No group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                <label>Assigned to<select value={edit.assignedToId} onChange={(e) => setEdit({ ...edit, assignedToId: e.target.value })}><option value="">Unassigned</option>{selectedGroup?.members.map((member) => <option key={member.user.id} value={member.user.id}>{member.user.name}</option>)}</select></label>
+                <button className="secondary" disabled={busy} onClick={() => save()}>Update state</button>
+              </div>
+            ) : (
+              <dl className="compact-fields"><dt>Status</dt><dd><span className={`badge ${task.status.toLowerCase()}`}>{task.status.replaceAll("_", " ")}</span></dd><dt>Assignment group</dt><dd>{task.assignmentGroup?.name || "No group"}</dd><dt>Assigned to</dt><dd>{task.assignedTo?.name || "Unassigned"}</dd><dt>Created</dt><dd>{new Date(task.createdAt).toLocaleString()}</dd></dl>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="detail-section">
+        <h3>Work notes</h3>
+        {canEdit && <div className="note-entry"><textarea rows={3} value={workNote} onChange={(e) => setWorkNote(e.target.value)} placeholder="Add a task work note. It will also appear on the parent problem." /><button className="primary" disabled={!workNote.trim() || busy} onClick={() => save(workNote)}>Add work note</button></div>}
+        <div className="activity-list task-note-list">
+          {taskNotes.length === 0 ? <p className="muted">No task work notes yet.</p> : taskNotes.map((activity) => <article key={activity.id}><div><b>{activity.createdBy.name}</b><span className="activity-type">TASK WORK NOTE</span><time>{new Date(activity.createdAt).toLocaleString()}</time></div><p>{activity.comment.replace(`${task.taskNumber}:`, "").trim()}</p></article>)}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function ChangeDetail({ change, token, canEdit, canReopen, groups, onUpdated, onClose }: { change: Incident; token: string; canEdit: boolean; canReopen: boolean; groups: AssignmentGroup[]; onUpdated: (value: Incident) => void; onClose: () => void }) {
-  const [form, setForm] = useState({ title: change.title, description: change.description || "", priority: change.priority?.name || "MEDIUM", changeType: change.change?.changeType || "NORMAL", risk: change.change?.risk || "MEDIUM", impact: change.change?.impact || "MEDIUM", plannedStart: change.change?.plannedStart?.slice(0, 16) || "", plannedEnd: change.change?.plannedEnd?.slice(0, 16) || "", implementationPlan: change.change?.implementationPlan || "", backoutPlan: change.change?.backoutPlan || "", testPlan: change.change?.testPlan || "" });
+  const [form, setForm] = useState({ title: change.title, description: change.description || "", priority: change.priority?.name || "MEDIUM", changeType: change.change?.changeType || "NORMAL", risk: change.change?.risk || "MEDIUM", impact: change.change?.impact || "MEDIUM", plannedStart: change.change?.plannedStart?.slice(0, 16) || "", plannedEnd: change.change?.plannedEnd?.slice(0, 16) || "", implementationPlan: change.change?.implementationPlan || "", rollbackPlan: change.change?.rollbackPlan || "", testPlan: change.change?.testPlan || "" });
+  const [configurationItem, setConfigurationItem] = useState<ConfigurationItem | null>(change.configurationItem || null);
   const [status, setStatus] = useState(change.status?.name || "OPEN");
   const [groupId, setGroupId] = useState(change.assignmentGroup?.id || groups[0]?.id || "");
   const [assigneeId, setAssigneeId] = useState(change.assignedTo?.id || "");
   const [note, setNote] = useState("");
-  const [activeTab, setActiveTab] = useState<"work-notes" | "related" | "plans">("work-notes");
+  const [activeTab, setActiveTab] = useState<"work-notes" | "approvals" | "related" | "plans">("work-notes");
+  const [showAttachments, setShowAttachments] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentConfig, setAttachmentConfig] = useState<{enabled:boolean;maxFileSizeMb:number}|null>(null);
   const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([]);
   const [relatedNumber, setRelatedNumber] = useState("");
+  const [relationType, setRelationType] = useState("CAUSED_INCIDENT");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
   const selectedGroup = groups.find((group) => group.id === groupId);
+  const approvals = change.change?.approvals || [];
   const activities = [...change.activities].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  async function save() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateChange(token, change.id, { ...form, plannedStart: form.plannedStart || undefined, plannedEnd: form.plannedEnd || undefined })); setSuccess("Change details updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update change"); } finally { setBusy(false); } }
+  async function save() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.updateChange(token, change.id, { ...form, configurationItemId: configurationItem?.id ?? null, plannedStart: form.plannedStart || undefined, plannedEnd: form.plannedEnd || undefined })); setSuccess("Change details updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update change"); } finally { setBusy(false); } }
   async function updateStatus() { setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.changeChangeStatus(token, change.id, status)); setSuccess("Status updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update status"); } finally { setBusy(false); } }
   async function assign() { if(!groupId||!assigneeId)return; setBusy(true); setError(""); setSuccess(""); try { onUpdated(await api.assignChange(token, change.id, { assignmentGroupId: groupId, assignedToId: assigneeId })); setSuccess("Assignment updated."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Assignment failed"); } finally { setBusy(false); } }
   async function addNote() { if(!note.trim())return; setBusy(true); setError(""); try { await api.addChangeActivity(token, change.id, note, canEdit ? "WORK_NOTE" : "COMMENT"); const refreshed = await api.changes(token); const value = refreshed.find((item)=>item.id===change.id); if(value) onUpdated(value); setNote(""); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add activity"); } finally { setBusy(false); } }
   async function loadRelated() { try { setRelatedItems(await api.relatedItems(token, change.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load related items"); } }
-  async function addRelated() { if(!relatedNumber.trim())return; setBusy(true); setError(""); setSuccess(""); try { await api.addRelatedItem(token, change.id, { relatedTicketNumber: relatedNumber, relationshipType: "RELATED_CHANGE" }); setRelatedNumber(""); await loadRelated(); setSuccess("Related item linked."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not link related item"); } finally { setBusy(false); } }
+  async function loadAttachments() { try { setAttachments(await api.attachments(token, change.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load attachments"); } }
+  async function uploadAttachment(file?: File) { if(!file)return;setBusy(true);setError("");try{await api.uploadAttachment(token,change.id,file);await loadAttachments();setSuccess("Attachment uploaded.");}catch(reason){setError(reason instanceof Error?reason.message:"Could not upload attachment")}finally{setBusy(false)} }
+  async function deleteAttachment(id:string) { setBusy(true);try{await api.deleteAttachment(token,change.id,id);await loadAttachments();setSuccess("Attachment deleted.");}catch(reason){setError(reason instanceof Error?reason.message:"Could not delete attachment")}finally{setBusy(false)} }
+  async function addRelated() { if(!relatedNumber.trim())return; setBusy(true); setError(""); setSuccess(""); try { await api.addRelatedItem(token, change.id, { relatedTicketNumber: relatedNumber, relationshipType: relationType }); setRelatedNumber(""); await loadRelated(); setSuccess("Related item linked."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not link related item"); } finally { setBusy(false); } }
   useEffect(() => { if(activeTab === "related") void loadRelated(); }, [activeTab, change.id]);
-  return <div className="modal-backdrop" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><section className={`modal detail-modal record-form-modal ${fullscreen ? "fullscreen" : ""}`}>
-    <div className="modal-head record-head"><div><p className="eyebrow">{change.ticketNumber}</p><h2>{change.title}</h2><p className="muted">{change.change?.changeType || "NORMAL"} change</p></div><div className="modal-head-actions"><button type="button" className="icon-button" title={fullscreen ? "Exit full screen" : "Full screen"} onClick={() => setFullscreen((value) => !value)}>{"\u2197"}</button><button type="button" className="icon-button" title="Close" onClick={onClose}>{"\u00d7"}</button></div></div>
+  useEffect(() => { api.attachmentConfiguration(token).then(value=>{setAttachmentConfig(value);if(value.enabled)void loadAttachments()}).catch(()=>setAttachmentConfig(null)); }, [token,change.id]);
+  return <section className="record-page record-form-modal change-detail-page">
+    <div className="modal-head record-head"><div><p className="eyebrow">{change.ticketNumber}</p><h2>{change.title}</h2><p className="muted">{change.change?.changeType || "NORMAL"} change</p></div><div className="modal-head-actions">{attachmentConfig?.enabled && <button type="button" className="icon-button attachment-icon" title={`Attachments (${attachments.length})`} onClick={() => setShowAttachments((value) => !value)}>📎</button>}<button type="button" className="secondary" onClick={onClose}>Back to queue</button></div></div>
     {success&&<div className="success">{success}</div>}{error&&<div className="error">{error}</div>}
+    {showAttachments && <div className="detail-section attachment-popover-panel"><AttachmentPanel attachments={attachments} enabled={attachmentConfig?.enabled} maxFileSizeMb={attachmentConfig?.maxFileSizeMb} busy={busy} onUpload={uploadAttachment} onDownload={(item)=>api.downloadAttachment(token,change.id,item.id,item.fileName)} onDelete={deleteAttachment} /></div>}
     <div className="record-two-column">
-      <div className="record-main-stack"><div className="detail-section problem-form-fields"><h3>Change details</h3>{canEdit ? <><label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea rows={4} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label><div className="form-grid"><label>Type<select value={form.changeType} onChange={(e)=>setForm({...form,changeType:e.target.value})}>{["STANDARD","NORMAL","EMERGENCY"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Risk<select value={form.risk} onChange={(e)=>setForm({...form,risk:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Impact<select value={form.impact} onChange={(e)=>setForm({...form,impact:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Priority<select value={form.priority} onChange={(e)=>setForm({...form,priority:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Planned start<input type="datetime-local" value={form.plannedStart} onChange={(e)=>setForm({...form,plannedStart:e.target.value})}/></label><label>Planned end<input type="datetime-local" value={form.plannedEnd} onChange={(e)=>setForm({...form,plannedEnd:e.target.value})}/></label></div><button className="primary" disabled={busy} onClick={save}>Save change</button></> : <p>{change.description || "No description provided."}</p>}</div></div>
-      <aside className="record-side-stack"><div className="detail-section compact-fields"><h3>Record info</h3><dl><dt>Requested By</dt><dd>{change.change?.requestedBy?.name || change.createdBy.name}</dd><dt>Opened On</dt><dd>{new Date(change.createdAt).toLocaleString()}</dd><dt>Priority</dt><dd>{change.priority?.name || form.priority}</dd><dt>Status</dt><dd><span className={`badge ${(change.status?.name || "OPEN").toLowerCase()}`}>{(change.status?.name || "OPEN").replaceAll("_", " ")}</span></dd><dt>Risk</dt><dd>{change.change?.risk || form.risk}</dd><dt>Impact</dt><dd>{change.change?.impact || form.impact}</dd></dl></div>{canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}{canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="AWAITING_CUSTOMER">Awaiting customer</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select><button className="secondary" disabled={busy} onClick={updateStatus}>Update status</button>{change.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an administrator can reopen a closed change.</p>}</div>}</aside>
+      <div className="record-main-stack"><div className="detail-section problem-form-fields"><h3>Change details</h3>{canEdit ? <><label>Title<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea rows={4} value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label><ConfigurationItemPicker token={token} selected={configurationItem} onSelect={setConfigurationItem} /><div className="form-grid"><label>Type<select value={form.changeType} onChange={(e)=>setForm({...form,changeType:e.target.value})}>{["STANDARD","NORMAL","EMERGENCY"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Risk<select value={form.risk} onChange={(e)=>setForm({...form,risk:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Impact<select value={form.impact} onChange={(e)=>setForm({...form,impact:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Priority<select value={form.priority} onChange={(e)=>setForm({...form,priority:e.target.value})}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x)=><option key={x}>{x}</option>)}</select></label><label>Planned start<input type="datetime-local" value={form.plannedStart} onChange={(e)=>setForm({...form,plannedStart:e.target.value})}/></label><label>Planned end<input type="datetime-local" value={form.plannedEnd} onChange={(e)=>setForm({...form,plannedEnd:e.target.value})}/></label></div><button className="primary" disabled={busy} onClick={save}>Save change</button></> : <dl className="compact-fields"><dt>Description</dt><dd>{change.description || "No description provided."}</dd><dt>Configuration Item</dt><dd>{change.configurationItem?.name || "Not linked"}</dd></dl>}</div></div>
+      <div className="record-side-stack"><div className="detail-section compact-fields"><h3>Record info</h3><dl><dt>Requested By</dt><dd>{change.change?.requestedBy?.name || change.createdBy.name}</dd><dt>Opened On</dt><dd>{new Date(change.createdAt).toLocaleString()}</dd><dt>Priority</dt><dd>{change.priority?.name || form.priority}</dd><dt>Status</dt><dd><span className={`badge ${(change.status?.name || "NEW").toLowerCase()}`}>{(change.status?.name || "NEW").replaceAll("_", " ")}</span></dd><dt>Risk</dt><dd>{change.change?.risk || form.risk}</dd><dt>Impact</dt><dd>{change.change?.impact || form.impact}</dd><dt>Configuration Item</dt><dd>{change.configurationItem?.name || "Not linked"}</dd></dl></div>{canEdit&&<div className="detail-section"><h3>Assignment</h3><div className="assignment-row stacked"><select value={groupId} onChange={(e)=>{setGroupId(e.target.value);setAssigneeId("");}}><option value="">Select group</option>{groups.map((g)=><option key={g.id} value={g.id}>{g.name}</option>)}</select><select value={assigneeId} onChange={(e)=>setAssigneeId(e.target.value)}><option value="">Select assignee</option>{selectedGroup?.members.map((m)=><option key={m.user.id} value={m.user.id}>{m.user.name}</option>)}</select><button className="secondary" disabled={!groupId||!assigneeId||busy} onClick={assign}>Update assignment</button></div></div>}{canEdit&&<div className="detail-section"><h3>Status</h3><select value={status} onChange={(e)=>setStatus(e.target.value)} disabled={change.status?.name==="CLOSED"&&!canReopen}>{changeStatusOptions.map((value)=><option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select><button className="secondary" disabled={busy||(change.status?.name==="CLOSED"&&!canReopen)} onClick={updateStatus}>Update status</button>{change.status?.name==="CLOSED"&&!canReopen&&<p className="muted">Only an IT Service Manager or administrator can reopen a closed change.</p>}</div>}</div>
     </div>
-    <div className="detail-section record-tab-shell"><div className="record-tabs"><button className={activeTab==="work-notes"?"active":""} onClick={()=>setActiveTab("work-notes")}>Work Notes</button><button className={activeTab==="plans"?"active":""} onClick={()=>setActiveTab("plans")}>Plans</button><button className={activeTab==="related"?"active":""} onClick={()=>setActiveTab("related")}>Related Items <span>{relatedItems.length}</span></button></div>{activeTab==="work-notes"&&<><div className="note-entry"><textarea rows={3} value={note} onChange={(e)=>setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."}/><button className="primary" disabled={!note.trim()||busy} onClick={addNote}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{activities.length ? activities.map((a)=><article key={a.id}><div><b>{a.createdBy.name}</b><span className="activity-type">{a.activityType?.name?.replace("_", " ")||"ACTIVITY"}</span><time>{new Date(a.createdAt).toLocaleString()}</time></div><p>{a.comment}</p></article>) : <p className="muted">No activity yet.</p>}</div></>}{activeTab==="plans"&&<div className="change-plan-grid">{["implementationPlan","backoutPlan","testPlan"].map((key)=><label key={key}>{key==="implementationPlan"?"Implementation plan":key==="backoutPlan"?"Backout plan":"Test plan"}<textarea rows={4} disabled={!canEdit} value={form[key as "implementationPlan"|"backoutPlan"|"testPlan"]} onChange={(e)=>setForm({...form,[key]:e.target.value})}/></label>)}{canEdit&&<button className="primary" disabled={busy} onClick={save}>Save plans</button>}</div>}{activeTab==="related"&&<div className="related-panel">{canEdit&&<div className="related-entry"><input value={relatedNumber} onChange={(e)=>setRelatedNumber(e.target.value)} placeholder="Ticket number, e.g. INC000001 or PRB000001"/><button className="secondary" onClick={addRelated} disabled={!relatedNumber.trim()||busy}>Link item</button></div>}{relatedItems.length===0?<p className="muted">No related items linked.</p>:<div className="related-list">{relatedItems.map((item)=><article key={item.id}><button className="link-button task-number-link" type="button">{item.ticketNumber}</button><span>{item.title}</span><span className="badge">{item.status}</span><small>{item.relationshipType.replaceAll("_"," ")}</small></article>)}</div>}</div>}</div>
-  </section></div>;
+    <div className="detail-section record-tab-shell"><div className="record-tabs"><button className={activeTab==="work-notes"?"active":""} onClick={()=>setActiveTab("work-notes")}>Work Notes</button><button className={activeTab==="plans"?"active":""} onClick={()=>setActiveTab("plans")}>Plans</button><button className={activeTab==="approvals"?"active":""} onClick={()=>setActiveTab("approvals")}>Approvals <span>{approvals.length}</span></button><button className={activeTab==="related"?"active":""} onClick={()=>setActiveTab("related")}>Related Items <span>{relatedItems.length}</span></button></div>{activeTab==="work-notes"&&<><div className="note-entry"><textarea rows={3} value={note} onChange={(e)=>setNote(e.target.value)} placeholder={canEdit ? "Add an internal work note..." : "Add a comment..."}/><button className="primary" disabled={!note.trim()||busy} onClick={addNote}>Add {canEdit ? "work note" : "comment"}</button></div><div className="activity-list">{activities.length ? activities.map((a)=><article key={a.id}><div><b>{a.createdBy.name}</b><span className="activity-type">{a.activityType?.name?.replace("_", " ")||"ACTIVITY"}</span><time>{new Date(a.createdAt).toLocaleString()}</time></div><p>{a.comment}</p></article>) : <p className="muted">No activity yet.</p>}</div></>}{activeTab==="plans"&&<div className="change-plan-grid stacked">{["implementationPlan","rollbackPlan","testPlan"].map((key)=><label key={key}>{key==="implementationPlan"?"Implementation plan":key==="rollbackPlan"?"Rollback plan":"Test plan"}<textarea rows={4} disabled={!canEdit} value={form[key as "implementationPlan"|"rollbackPlan"|"testPlan"]} onChange={(e)=>setForm({...form,[key]:e.target.value})}/></label>)}{canEdit&&<button className="primary" disabled={busy} onClick={save}>Save plans</button>}</div>}{activeTab==="approvals"&&<div className="approval-step-list">{approvals.length===0?<p className="muted">No approval steps generated for this change.</p>:approvals.map((approval)=><article key={approval.id}><b>Step {approval.sequence}</b><div><strong>{approval.approvalType.replace("_", " ")}</strong><small>{approval.approver?.name || "Approver pending"}</small></div><span className={`badge ${approval.status.toLowerCase()}`}>{approval.status}</span></article>)}</div>}{activeTab==="related"&&<div className="related-panel">{canEdit&&<div className="related-entry"><select value={relationType} onChange={(e)=>setRelationType(e.target.value)}><option value="CAUSED_INCIDENT">Caused incident</option><option value="IMPLEMENTED_BY_CHANGE">Implemented request/problem</option><option value="RELATED_PROBLEM">Related problem</option><option value="RELATED_CHANGE">Related change</option></select><input value={relatedNumber} onChange={(e)=>setRelatedNumber(e.target.value)} placeholder="Ticket number, e.g. INC000001 or PRB000001"/><button className="secondary" onClick={addRelated} disabled={!relatedNumber.trim()||busy}>Link item</button></div>}{relatedItems.length===0?<p className="muted">No related items linked.</p>:<div className="related-list">{relatedItems.map((item)=><article key={item.id}><button className="link-button task-number-link" type="button">{item.ticketNumber}</button><span>{item.title}</span><span className="badge">{item.status}</span><small>{relationshipLabel(item.relationshipType)}</small></article>)}</div>}</div>}</div>
+  </section>;
+}
+
+const emptyCmdbLookups: CmdbLookupData = { categories: [], types: [], statuses: [], relationshipTypes: [] };
+const emptyCiForm = { ciNumber: "", name: "", categoryId: "", typeId: "", statusId: "", ownerId: "", environment: "", criticality: "MEDIUM", description: "" };
+const emptyRelationshipForm = { parentCiId: "", relationshipTypeId: "", childCiId: "", status: "ACTIVE", description: "" };
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let current = "";
+  let row: string[] = [];
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (char === '"' && quoted && next === '"') { current += '"'; i += 1; continue; }
+    if (char === '"') { quoted = !quoted; continue; }
+    if (char === "," && !quoted) { row.push(current); current = ""; continue; }
+    if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") i += 1;
+      row.push(current); rows.push(row); row = []; current = ""; continue;
+    }
+    current += char;
+  }
+  if (current || row.length) { row.push(current); rows.push(row); }
+  const headers = (rows.shift() || []).map((value) => value.trim().toLowerCase());
+  return rows.filter((values) => values.some((value) => value.trim())).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]?.trim() || ""])));
+}
+
+function CmdbModule({ token, user, onOpenTicket }: { token: string; user: User; onOpenTicket: (type: "INCIDENT" | "PROBLEM" | "CHANGE", id: string) => void }) {
+  const canManage = user.roles.some((role) => ["IT_SERVICE_MANAGER", "ADMIN"].includes(role));
+  const canImport = user.roles.includes("ADMIN");
+  const [tab, setTab] = useState<"items" | "relationships" | "import">("items");
+  const [lookups, setLookups] = useState<CmdbLookupData>(emptyCmdbLookups);
+  const [items, setItems] = useState<ConfigurationItem[]>([]);
+  const [relationships, setRelationships] = useState<CmdbRelationship[]>([]);
+  const [selected, setSelected] = useState<ConfigurationItem | null>(null);
+  const [editing, setEditing] = useState<ConfigurationItem | null>(null);
+  const [editingRelationship, setEditingRelationship] = useState<CmdbRelationship | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showRelationship, setShowRelationship] = useState(false);
+  const [ciForm, setCiForm] = useState(emptyCiForm);
+  const [ownerUser, setOwnerUser] = useState<Pick<User, "id" | "name" | "email"> | null>(null);
+  const [relationshipForm, setRelationshipForm] = useState(emptyRelationshipForm);
+  const [search, setSearch] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [typeId, setTypeId] = useState("");
+  const [statusId, setStatusId] = useState("");
+  const [relationshipTypeId, setRelationshipTypeId] = useState("");
+  const [relationshipStatus, setRelationshipStatus] = useState("");
+  const [relationshipSide, setRelationshipSide] = useState("all");
+  const [importRows, setImportRows] = useState<Record<string, string>[]>([]);
+  const [preview, setPreview] = useState<CmdbImportPreview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const query = new URLSearchParams({ search, categoryId, typeId, statusId, active: "true" });
+  const relationshipQuery = new URLSearchParams({ search, relationshipTypeId, status: relationshipStatus, side: relationshipSide });
+  const itemFilterTypes = categoryId ? lookups.types.filter((type) => type.categoryId === categoryId) : lookups.types;
+  const formTypes = ciForm.categoryId ? lookups.types.filter((type) => type.categoryId === ciForm.categoryId) : lookups.types;
+  async function loadAll() {
+    setLoading(true); setError("");
+    try {
+      const [lookupValues, ciValues, relationshipValues] = await Promise.all([api.cmdbLookups(token), api.cmdbItems(token, query.toString()), api.cmdbRelationships(token, relationshipQuery.toString())]);
+      setLookups(lookupValues);
+      setItems(ciValues.data);
+      setRelationships(relationshipValues);
+      const firstCategoryId = lookupValues.categories[0]?.id || "";
+      const firstTypeId = lookupValues.types.find((type) => type.categoryId === firstCategoryId)?.id || lookupValues.types[0]?.id || "";
+      setCiForm((value) => ({ ...value, categoryId: value.categoryId || firstCategoryId, typeId: value.typeId || firstTypeId, statusId: value.statusId || lookupValues.statuses.find((x) => x.name === "ACTIVE")?.id || lookupValues.statuses[0]?.id || "" }));
+      setRelationshipForm((value) => ({ ...value, relationshipTypeId: value.relationshipTypeId || lookupValues.relationshipTypes[0]?.id || "" }));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load CMDB"); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void loadAll(); }, [token]);
+  async function refreshItems() { const value = await api.cmdbItems(token, query.toString()); setItems(value.data); }
+  async function refreshRelationships() { setRelationships(await api.cmdbRelationships(token, relationshipQuery.toString())); }
+  async function openDetail(id: string) { setBusy(true); setError(""); try { setSelected(await api.cmdbItem(token, id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load CI details"); } finally { setBusy(false); } }
+  function startCreate() { const firstCategoryId = lookups.categories[0]?.id || ""; setEditing(null); setOwnerUser(null); setCiForm({ ...emptyCiForm, categoryId: firstCategoryId, typeId: lookups.types.find((type) => type.categoryId === firstCategoryId)?.id || "", statusId: lookups.statuses.find((x) => x.name === "ACTIVE")?.id || lookups.statuses[0]?.id || "" }); setShowCreate(true); }
+  function startEdit(item: ConfigurationItem) { setEditing(item); setOwnerUser(item.owner || null); setCiForm({ ciNumber: item.ciNumber || "", name: item.name, categoryId: item.category?.id || "", typeId: item.type?.id || "", statusId: item.status?.id || "", ownerId: item.owner?.id || "", environment: item.environment || "", criticality: item.criticality || "MEDIUM", description: item.description || "" }); setShowCreate(true); }
+  async function saveCi(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError(""); setSuccess("");
+    try {
+      const input = { ...ciForm, ciNumber: ciForm.ciNumber || undefined, ownerId: ownerUser?.id || undefined, environment: ciForm.environment || undefined, description: ciForm.description || undefined };
+      const saved = editing ? await api.updateCmdbItem(token, editing.id, input) : await api.createCmdbItem(token, input);
+      setSuccess(editing ? "Configuration item updated." : "Configuration item created.");
+      setShowCreate(false); setEditing(null); await refreshItems(); if (selected?.id === saved.id) setSelected(await api.cmdbItem(token, saved.id));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save CI"); }
+    finally { setBusy(false); }
+  }
+  async function deactivateCi(id: string) { setBusy(true); setError(""); try { await api.deactivateCmdbItem(token, id); setSuccess("Configuration item deactivated."); setSelected(null); await refreshItems(); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not deactivate CI"); } finally { setBusy(false); } }
+  function startRelationship(row?: CmdbRelationship) {
+    setEditingRelationship(row || null);
+    setRelationshipForm(row ? { parentCiId: row.parentCi.id, relationshipTypeId: row.relationshipType.id, childCiId: row.childCi.id, status: row.status, description: row.description || "" } : { ...emptyRelationshipForm, relationshipTypeId: lookups.relationshipTypes[0]?.id || "" });
+    setShowRelationship(true);
+  }
+  async function saveRelationship(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError(""); setSuccess("");
+    try {
+      if (editingRelationship) await api.updateCmdbRelationship(token, editingRelationship.id, relationshipForm);
+      else await api.createCmdbRelationship(token, relationshipForm);
+      setSuccess(editingRelationship ? "Relationship updated." : "Relationship added.");
+      setShowRelationship(false); setEditingRelationship(null); await refreshRelationships(); if (selected) setSelected(await api.cmdbItem(token, selected.id));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save relationship"); }
+    finally { setBusy(false); }
+  }
+  async function deleteRelationship(id: string) { setBusy(true); setError(""); try { await api.deleteCmdbRelationship(token, id); setSuccess("Relationship deleted."); await refreshRelationships(); if (selected) setSelected(await api.cmdbItem(token, selected.id)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete relationship"); } finally { setBusy(false); } }
+  async function previewFile(file?: File) {
+    if (!file) return; setBusy(true); setError(""); setSuccess(""); setPreview(null);
+    try { const rows = parseCsv(await file.text()); setImportRows(rows); setPreview(await api.previewCmdbImport(token, rows)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not preview import"); }
+    finally { setBusy(false); }
+  }
+  async function confirmImport() {
+    setBusy(true); setError(""); setSuccess("");
+    try { const result = await api.confirmCmdbImport(token, importRows); setPreview(result); setSuccess(`Import complete. Created ${result.createdRecords || 0} CI(s), skipped ${result.skippedRecords || 0}.`); await refreshItems(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not import CIs"); }
+    finally { setBusy(false); }
+  }
+  const ciOptions = items.map((item) => <option key={item.id} value={item.id}>{item.ciNumber ? `${item.ciNumber} - ` : ""}{item.name}</option>);
+  return <section className="cmdb-workspace">
+    <header><div><p className="eyebrow">CMDB</p><h1>Configuration Management Database</h1><p>Manage configuration items, dependencies, and bulk CI onboarding.</p></div>{canManage && tab === "items" && <button className="primary compact" onClick={startCreate}>Create CI</button>}{canManage && tab === "relationships" && <button className="primary compact" onClick={() => startRelationship()}>Add Relationship</button>}</header>
+    {error && <div className="error">{error}</div>}{success && <div className="success">{success}</div>}
+    <div className="record-tabs"><button className={tab === "items" ? "active" : ""} onClick={() => setTab("items")}>Configuration Items</button><button className={tab === "relationships" ? "active" : ""} onClick={() => setTab("relationships")}>Relationships</button>{canImport && <button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}>Import</button>}</div>
+    {tab === "items" && <div className="table-card"><div className="table-head"><div><h2>Configuration Items</h2><p>{loading ? "Loading CMDB…" : `${items.length} item(s) shown`}</p></div><div className="queue-filters"><input className="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search CI"/><select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setTypeId(""); }}><option value="">All categories</option>{lookups.categories.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select value={typeId} onChange={(e) => setTypeId(e.target.value)}><option value="">All types</option>{itemFilterTypes.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select value={statusId} onChange={(e) => setStatusId(e.target.value)}><option value="">All statuses</option>{lookups.statuses.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><button className="secondary small" onClick={refreshItems}>Apply</button></div></div>{items.length === 0 ? <div className="empty"><b>No configuration items found</b><span>Create a CI or adjust filters.</span></div> : <div className="table-wrap"><table><thead><tr><th>CI</th><th>Category</th><th>Type</th><th>Status</th><th>Owner</th><th>Criticality</th><th>Relationships</th><th>Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><button className="ticket-link" onClick={() => openDetail(item.id)}>{item.ciNumber || item.name}</button><small>{item.ciNumber ? item.name : item.description || "Configuration item"}</small></td><td>{item.category?.name || "Uncategorized"}</td><td>{item.type?.name || item.ciType || "Unknown"}</td><td><span className={`badge ${(item.status?.name || "unknown").toLowerCase()}`}>{item.status?.name || "Unknown"}</span></td><td>{item.owner?.name || <span className="muted">Unassigned</span>}</td><td>{item.criticality || "MEDIUM"}</td><td>{item.relationshipCount || 0}</td><td>{canManage && <button className="secondary small" onClick={() => startEdit(item)}>Edit</button>}</td></tr>)}</tbody></table></div>}</div>}
+    {tab === "relationships" && <div className="table-card"><div className="table-head"><div><h2>Relationships</h2><p>Parent-child CI dependencies, ready for future graph views.</p></div><div className="queue-filters"><input className="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search CI"/><select value={relationshipTypeId} onChange={(e) => setRelationshipTypeId(e.target.value)}><option value="">All relationship types</option>{lookups.relationshipTypes.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select value={relationshipStatus} onChange={(e) => setRelationshipStatus(e.target.value)}><option value="">All statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select><select value={relationshipSide} onChange={(e) => setRelationshipSide(e.target.value)}><option value="all">Parent or child</option><option value="parent">Parent only</option><option value="child">Child only</option></select><button className="secondary small" onClick={refreshRelationships}>Apply</button></div></div>{relationships.length === 0 ? <div className="empty"><b>No relationships found</b><span>Add a relationship between two CIs.</span></div> : <div className="table-wrap"><table><thead><tr><th>Parent CI</th><th>Relationship Type</th><th>Child CI</th><th>Status</th><th>Created By</th><th>Updated At</th><th>Actions</th></tr></thead><tbody>{relationships.map((row) => <tr key={row.id}><td>{row.parentCi.ciNumber ? `${row.parentCi.ciNumber} - ` : ""}{row.parentCi.name}</td><td>{row.relationshipType.name}</td><td>{row.childCi.ciNumber ? `${row.childCi.ciNumber} - ` : ""}{row.childCi.name}</td><td><span className={`badge ${row.status.toLowerCase()}`}>{row.status}</span></td><td>{row.createdBy.name}</td><td>{new Date(row.updatedAt).toLocaleString()}</td><td>{canManage && <><button className="secondary small" onClick={() => startRelationship(row)}>Edit</button><button className="secondary small danger" onClick={() => deleteRelationship(row.id)}>Delete</button></>}</td></tr>)}</tbody></table></div>}</div>}
+    {tab === "import" && canImport && <div className="detail-section"><h2>Import Configuration Items</h2><p className="muted">Upload CSV with: name, ci_number, category, type, status, environment, criticality, owner_email, description.</p><label className="attachment-upload">Upload CSV<input type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => { void previewFile(e.target.files?.[0]); e.target.value = ""; }}/></label>{preview && <div className="import-summary"><div className="stats"><article><span>Total rows</span><strong>{preview.totalRows}</strong></article><article><span>Valid rows</span><strong>{preview.validRows}</strong></article><article><span>Failed rows</span><strong>{preview.failedRows}</strong></article><article><span>Created</span><strong>{preview.createdRecords ?? 0}</strong></article></div>{preview.errors.length > 0 && <div className="admin-list"><h3>Import errors</h3>{preview.errors.slice(0, 50).map((item, index) => <article key={`${item.rowNumber}-${index}`}><b>Row {item.rowNumber}</b><small>{item.reason}</small></article>)}</div>}<button className="primary" disabled={busy || preview.validRows === 0} onClick={confirmImport}>Confirm import valid rows</button></div>}</div>}
+    {selected && <div className="modal-backdrop"><section className="record-form-modal"><div className="modal-head"><div><p className="eyebrow">{selected.ciNumber || "CI"}</p><h2>{selected.name}</h2></div><button className="icon-button" onClick={() => setSelected(null)}>×</button></div><div className="record-two-column"><div className="detail-section compact-fields"><h3>Basic details</h3><dl><dt>Category</dt><dd>{selected.category?.name || "Uncategorized"}</dd><dt>Type</dt><dd>{selected.type?.name || selected.ciType || "Unknown"}</dd><dt>Status</dt><dd>{selected.status?.name || "Unknown"}</dd><dt>Owner</dt><dd>{selected.owner?.name || "Unassigned"}</dd><dt>Environment</dt><dd>{selected.environment || "Not set"}</dd><dt>Criticality</dt><dd>{selected.criticality || "MEDIUM"}</dd><dt>Description</dt><dd>{selected.description || "No description"}</dd></dl>{canManage && <div className="modal-actions"><button className="secondary" onClick={() => startEdit(selected)}>Edit</button><button className="secondary danger" onClick={() => deactivateCi(selected.id)}>Deactivate</button></div>}</div><div className="detail-section compact-fields"><h3>Relationship summary</h3><dl><dt>Parents</dt><dd>{selected.parents?.length || 0}</dd><dt>Children</dt><dd>{selected.children?.length || 0}</dd><dt>Open relationship count</dt><dd>{selected.openRelationshipCount || 0}</dd></dl></div></div><div className="record-tabs"><button>Parents</button><button>Children</button><button>Related Incidents</button><button>Related Problems</button><button>Related Changes</button></div><div className="related-list">{[...(selected.parents || []).map((r) => ({ label: `Parent: ${r.ci.name}`, meta: r.relationshipType, id: r.id })), ...(selected.children || []).map((r) => ({ label: `Child: ${r.ci.name}`, meta: r.relationshipType, id: r.id }))].map((item) => <article key={item.id}><span>{item.label}</span><small>{item.meta}</small></article>)}{["INCIDENT", "PROBLEM", "CHANGE"].flatMap((type) => ((type === "INCIDENT" ? selected.relatedIncidents : type === "PROBLEM" ? selected.relatedProblems : selected.relatedChanges) || []).map((ticket) => <article key={ticket.id}><button className="link-button task-number-link" onClick={() => onOpenTicket(type as "INCIDENT" | "PROBLEM" | "CHANGE", ticket.id)}>{ticket.ticketNumber}</button><span>{ticket.title}</span><span className="badge">{ticket.status}</span><small>{ticket.assignmentGroup?.name || "Unassigned"}</small></article>))}</div></section></div>}
+    {showCreate && <div className="modal-backdrop"><form className="record-form-modal" onSubmit={saveCi}><div className="modal-head"><div><p className="eyebrow">CMDB</p><h2>{editing ? "Edit CI" : "Create CI"}</h2></div><button type="button" className="icon-button" onClick={() => setShowCreate(false)}>×</button></div><label>CI Number<input value={ciForm.ciNumber} onChange={(e) => setCiForm({ ...ciForm, ciNumber: e.target.value })} placeholder="Optional; auto-generated if empty"/></label><label>Name<input required value={ciForm.name} onChange={(e) => setCiForm({ ...ciForm, name: e.target.value })}/></label><div className="form-grid"><label>Category<select required value={ciForm.categoryId} onChange={(e) => { const nextCategoryId = e.target.value; const nextTypeId = lookups.types.find((type) => type.categoryId === nextCategoryId)?.id || ""; setCiForm({ ...ciForm, categoryId: nextCategoryId, typeId: nextTypeId }); }}>{lookups.categories.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Type<select required value={ciForm.typeId} onChange={(e) => setCiForm({ ...ciForm, typeId: e.target.value })}>{formTypes.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Status<select required value={ciForm.statusId} onChange={(e) => setCiForm({ ...ciForm, statusId: e.target.value })}>{lookups.statuses.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Criticality<select value={ciForm.criticality} onChange={(e) => setCiForm({ ...ciForm, criticality: e.target.value })}>{["LOW","MEDIUM","HIGH","CRITICAL"].map((x) => <option key={x}>{x}</option>)}</select></label></div><label>Environment<input value={ciForm.environment} onChange={(e) => setCiForm({ ...ciForm, environment: e.target.value })} placeholder="Production, UAT, Dev..."/></label><UserSearchPicker token={token} label="Owner" selected={ownerUser} onSelect={setOwnerUser}/><label>Description<textarea rows={3} value={ciForm.description} onChange={(e) => setCiForm({ ...ciForm, description: e.target.value })}/></label><div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Saving..." : "Save"}</button></div></form></div>}
+    {showRelationship && <div className="modal-backdrop"><form className="record-form-modal" onSubmit={saveRelationship}><div className="modal-head"><div><p className="eyebrow">CMDB Relationship</p><h2>{editingRelationship ? "Edit Relationship" : "Add Relationship"}</h2></div><button type="button" className="icon-button" onClick={() => setShowRelationship(false)}>×</button></div><label>Parent CI<select required value={relationshipForm.parentCiId} onChange={(e) => setRelationshipForm({ ...relationshipForm, parentCiId: e.target.value })}><option value="">Select parent CI</option>{ciOptions}</select></label><label>Relationship Type<select required value={relationshipForm.relationshipTypeId} onChange={(e) => setRelationshipForm({ ...relationshipForm, relationshipTypeId: e.target.value })}>{lookups.relationshipTypes.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Child CI<select required value={relationshipForm.childCiId} onChange={(e) => setRelationshipForm({ ...relationshipForm, childCiId: e.target.value })}><option value="">Select child CI</option>{ciOptions}</select></label><label>Status<select value={relationshipForm.status} onChange={(e) => setRelationshipForm({ ...relationshipForm, status: e.target.value })}><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select></label><label>Description<textarea rows={3} value={relationshipForm.description} onChange={(e) => setRelationshipForm({ ...relationshipForm, description: e.target.value })}/></label><div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowRelationship(false)}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Saving..." : "Save"}</button></div></form></div>}
+  </section>;
 }
 
 function AdminConsole({
@@ -1551,20 +2068,26 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
   const [creatingChange, setCreatingChange] = useState(false);
   const [selected, setSelected] = useState<Incident | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<Incident | null>(null);
+  const [selectedRequestTask, setSelectedRequestTask] = useState<{ request: Incident; task: RequestTask } | null>(null);
   const [selectedProblem, setSelectedProblem] = useState<Incident | null>(null);
+  const [selectedProblemTask, setSelectedProblemTask] = useState<{ problem: Incident; task: ProblemTask } | null>(null);
   const [selectedChange, setSelectedChange] = useState<Incident | null>(null);
-  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS" | "APPROVALS" | "PROBLEMS" | "CHANGES">(() => {
+  const [activeModule, setActiveModule] = useState<"INCIDENTS" | "REQUESTS" | "APPROVALS" | "PROBLEMS" | "CHANGES" | "CMDB">(() => {
     const saved = localStorage.getItem(modulePreferenceKey);
-    return saved === "REQUESTS" || saved === "APPROVALS" || saved === "PROBLEMS" || saved === "CHANGES" ? saved : "INCIDENTS";
+    return saved === "REQUESTS" || saved === "APPROVALS" || saved === "PROBLEMS" || saved === "CHANGES" || saved === "CMDB" ? saved : "INCIDENTS";
   });
   const canOperate = session.user.roles.some((role) =>
     ["IT_AGENT", "IT_SERVICE_MANAGER", "ADMIN"].includes(role),
   );
+  const isCoreServiceRole = session.user.roles.some((role) => ["IT_AGENT", "IT_SERVICE_MANAGER", "ADMIN"].includes(role));
   const isEmployee = !canOperate;
   const isAdmin = session.user.roles.includes("ADMIN");
+  const canReopenProblem = isAdmin || session.user.roles.includes("IT_SERVICE_MANAGER");
+  const canReopenChange = isAdmin || session.user.roles.includes("IT_SERVICE_MANAGER");
   const [groups, setGroups] = useState<AssignmentGroup[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [queueScope, setQueueScope] = useState<"MY_GROUPS" | "ALL">(() => session.user.roles.some((role) => ["IT_AGENT", "IT_SERVICE_MANAGER", "ADMIN"].includes(role)) ? "ALL" : "MY_GROUPS");
   const [adminOpen, setAdminOpen] = useState(false);
   const [analyticsOpen,setAnalyticsOpen]=useState(false);
   useEffect(() => {
@@ -1592,41 +2115,55 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
     localStorage.setItem(modulePreferenceKey, activeModule);
   }, [activeModule]);
   useEffect(() => {
+    if (isEmployee && activeModule === "CMDB") setActiveModule("INCIDENTS");
+  }, [isEmployee, activeModule]);
+  useEffect(() => {
     if (!isEmployee)
       api
         .assignmentGroups(session.accessToken)
         .then(setGroups)
         .catch(() => setGroups([]));
   }, [isEmployee, session.accessToken]);
+  const myGroupIds = useMemo(() => groups.filter((group) => group.members.some((member) => member.user.id === session.user.id)).map((group) => group.id), [groups, session.user.id]);
+  const matchesQueueScope = (ticket: Incident) => queueScope === "ALL" || (ticket.assignmentGroup?.id ? myGroupIds.includes(ticket.assignmentGroup.id) : false);
+  const scopedIncidents = useMemo(() => incidents.filter(matchesQueueScope), [incidents, queueScope, myGroupIds]);
+  const scopedRequests = useMemo(() => serviceRequests.filter(matchesQueueScope), [serviceRequests, queueScope, myGroupIds]);
+  const scopedProblems = useMemo(() => problems.filter(matchesQueueScope), [problems, queueScope, myGroupIds]);
+  const scopedChanges = useMemo(() => changes.filter(matchesQueueScope), [changes, queueScope, myGroupIds]);
+  const ongoingIncidents = useMemo(() => scopedIncidents.filter(isOngoingTicket), [scopedIncidents]);
+  const ongoingRequests = useMemo(() => scopedRequests.filter(isOngoingTicket), [scopedRequests]);
+  const ongoingProblems = useMemo(() => scopedProblems.filter(isOngoingTicket), [scopedProblems]);
+  const ongoingChanges = useMemo(() => scopedChanges.filter(isOngoingChange), [scopedChanges]);
   const stats = useMemo(
     () => ({
-      open: incidents.filter((i) => i.status?.name === "OPEN").length,
-      active: incidents.filter((i) => i.status?.name === "IN_PROGRESS").length,
-      critical: incidents.filter((i) => i.priority?.name === "CRITICAL").length,
+      open: ongoingIncidents.filter((i) => i.status?.name === "OPEN").length,
+      active: ongoingIncidents.filter((i) => i.status?.name === "IN_PROGRESS").length,
+      critical: ongoingIncidents.filter((i) => i.priority?.name === "CRITICAL").length,
+      total: ongoingIncidents.length,
     }),
-    [incidents],
+    [ongoingIncidents],
   );
   const requestStats = useMemo(
     () => ({
-      open: serviceRequests.filter((i) => !["RESOLVED", "CLOSED"].includes(i.status?.name || "")).length,
-      inProgress: serviceRequests.filter((i) => i.status?.name === "IN_PROGRESS").length,
-      total: serviceRequests.length,
+      open: ongoingRequests.length,
+      inProgress: ongoingRequests.filter((i) => i.status?.name === "IN_PROGRESS").length,
+      total: ongoingRequests.length,
       catalogItems: catalog.reduce((total, category) => total + category.items.length, 0),
     }),
-    [catalog, serviceRequests],
+    [catalog, ongoingRequests],
   );
   const problemStats = useMemo(
     () => ({
-      open: problems.filter((i) => !["RESOLVED", "CLOSED"].includes(i.status?.name || "")).length,
-      inProgress: problems.filter((i) => i.status?.name === "IN_PROGRESS").length,
-      knownErrors: problems.filter((i) => i.problem?.knownError).length,
-      total: problems.length,
+      open: ongoingProblems.length,
+      inProgress: ongoingProblems.filter((i) => ["ASSESS", "ROOT_CAUSE_ANALYSIS", "FIX"].includes(i.status?.name || "")).length,
+      knownErrors: ongoingProblems.filter((i) => i.problem?.knownError).length,
+      total: ongoingProblems.length,
     }),
-    [problems],
+    [ongoingProblems],
   );
   const visibleIncidents = useMemo(
     () =>
-      incidents.filter((incident) => {
+      scopedIncidents.filter((incident) => {
         const term = search.toLowerCase();
         const matchesText =
           !term ||
@@ -1637,11 +2174,11 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           statusFilter === "ALL" || incident.status?.name === statusFilter;
         return matchesText && matchesStatus;
       }),
-    [incidents, search, statusFilter],
+    [scopedIncidents, search, statusFilter],
   );
   const visibleServiceRequests = useMemo(
     () =>
-      serviceRequests.filter((request) => {
+      scopedRequests.filter((request) => {
         const term = search.toLowerCase();
         const matchesText =
           !term ||
@@ -1652,11 +2189,31 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           statusFilter === "ALL" || request.status?.name === statusFilter;
         return matchesText && matchesStatus;
       }),
-    [serviceRequests, search, statusFilter],
+    [scopedRequests, search, statusFilter],
+  );
+  const visibleRequestTaskItems = useMemo<RequestQueueItem[]>(
+    () =>
+      scopedRequests.flatMap((request) =>
+        (request.serviceRequest?.tasks || [])
+          .filter((task) => {
+            const term = search.toLowerCase();
+            const matchesText =
+              !term ||
+              task.taskNumber.toLowerCase().includes(term) ||
+              task.title.toLowerCase().includes(term) ||
+              task.description?.toLowerCase().includes(term) ||
+              request.ticketNumber.toLowerCase().includes(term);
+            const matchesStatus =
+              statusFilter === "ALL" || task.status === statusFilter;
+            return matchesText && matchesStatus;
+          })
+          .map((task) => ({ kind: "request-task" as const, ticket: request, task })),
+      ),
+    [scopedRequests, search, statusFilter],
   );
   const visibleProblems = useMemo(
     () =>
-      problems.filter((problem) => {
+      scopedProblems.filter((problem) => {
         const term = search.toLowerCase();
         const matchesText =
           !term ||
@@ -1667,11 +2224,11 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           statusFilter === "ALL" || problem.status?.name === statusFilter;
         return matchesText && matchesStatus;
       }),
-    [problems, search, statusFilter],
+    [scopedProblems, search, statusFilter],
   );
   const visibleChanges = useMemo(
     () =>
-      changes.filter((change) => {
+      scopedChanges.filter((change) => {
         const term = search.toLowerCase();
         const matchesText =
           !term ||
@@ -1682,16 +2239,16 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           statusFilter === "ALL" || change.status?.name === statusFilter;
         return matchesText && matchesStatus;
       }),
-    [changes, search, statusFilter],
+    [scopedChanges, search, statusFilter],
   );
   const changeStats = useMemo(
     () => ({
-      open: changes.filter((i) => !["RESOLVED", "CLOSED"].includes(i.status?.name || "")).length,
-      inProgress: changes.filter((i) => i.status?.name === "IN_PROGRESS").length,
-      highRisk: changes.filter((i) => ["HIGH", "CRITICAL"].includes(i.change?.risk || "")).length,
-      total: changes.length,
+      open: ongoingChanges.filter((i) => i.status?.name === "NEW").length,
+      inProgress: ongoingChanges.filter((i) => ["PLAN", "APPROVAL", "CAB", "SCHEDULED", "IMPLEMENT", "VALIDATE"].includes(i.status?.name || "")).length,
+      highRisk: ongoingChanges.filter((i) => ["HIGH", "CRITICAL"].includes(i.change?.risk || "")).length,
+      total: ongoingChanges.length,
     }),
-    [changes],
+    [ongoingChanges],
   );
   const visibleApprovalRequests = useMemo(
     () =>
@@ -1708,30 +2265,47 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
       }),
     [approvalRequests, search, statusFilter],
   );
-  const queueItems = activeModule === "REQUESTS" ? visibleServiceRequests : activeModule === "APPROVALS" ? visibleApprovalRequests : activeModule === "PROBLEMS" ? visibleProblems : activeModule === "CHANGES" ? visibleChanges : visibleIncidents;
+  const requestQueueItems = useMemo<RequestQueueItem[]>(() => [...visibleServiceRequests.map((ticket) => ({ kind: "request" as const, ticket })), ...visibleRequestTaskItems], [visibleServiceRequests, visibleRequestTaskItems]);
+  const queueItems = activeModule === "REQUESTS" ? requestQueueItems : activeModule === "APPROVALS" ? visibleApprovalRequests : activeModule === "PROBLEMS" ? visibleProblems : activeModule === "CHANGES" ? visibleChanges : visibleIncidents;
+  const openModule = (module: "INCIDENTS" | "REQUESTS" | "APPROVALS" | "PROBLEMS" | "CHANGES" | "CMDB") => {
+    setSelected(null);
+    setSelectedRequest(null);
+    setSelectedRequestTask(null);
+    setSelectedProblem(null);
+    setSelectedProblemTask(null);
+    setSelectedChange(null);
+    setCreating(false);
+    setCreatingRequest(false);
+    setCreatingProblem(false);
+    setCreatingChange(false);
+    setActiveModule(module);
+  };
   return (
     <div className="app-shell">
       <aside>
         <Brand branding={branding} />
         <nav>
-          <a className={activeModule === "INCIDENTS" ? "active" : ""} onClick={() => setActiveModule("INCIDENTS")}>
+          <a className={activeModule === "INCIDENTS" ? "active" : ""} onClick={() => openModule("INCIDENTS")}>
             ▦ <span>Incidents</span>
           </a>
-          <a className={activeModule === "REQUESTS" ? "active" : ""} onClick={() => setActiveModule("REQUESTS")}>
+          <a className={activeModule === "REQUESTS" ? "active" : ""} onClick={() => openModule("REQUESTS")}>
             ⌁ <span>Service requests</span>
           </a>
-          <a className={activeModule === "APPROVALS" ? "active" : ""} onClick={() => setActiveModule("APPROVALS")}>
+          <a className={activeModule === "APPROVALS" ? "active" : ""} onClick={() => openModule("APPROVALS")}>
             ↗ <span>Approvals</span>
           </a>
-          <a className={activeModule === "PROBLEMS" ? "active" : ""} onClick={() => setActiveModule("PROBLEMS")}>
+          <a className={activeModule === "PROBLEMS" ? "active" : ""} onClick={() => openModule("PROBLEMS")}>
             ◇ <span>Problems</span>
           </a>
-          <a>
+          <a
+            className={activeModule === "CHANGES" ? "active" : ""}
+            onClick={() => openModule("CHANGES")}
+          >
             ⇄ <span>Changes</span>
           </a>
-          <a>
-            ◫ <span>Configuration</span>
-          </a>
+          {!isEmployee && <a className={activeModule === "CMDB" ? "active" : ""} onClick={() => openModule("CMDB")}>
+            ◫ <span>CMDB</span>
+          </a>}
           <a>
             □ <span>Knowledge</span>
           </a>
@@ -1753,6 +2327,145 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
         </div>
       </aside>
       <main className="workspace">
+        {selected ? (
+          <IncidentDetail
+            incident={selected}
+            token={session.accessToken}
+            groups={groups}
+            canEdit={canOperate}
+            canReopen={isAdmin}
+            onClose={() => setSelected(null)}
+            onUpdated={(updated) => {
+              setSelected(updated);
+              setIncidents((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              );
+            }}
+          />
+        ) : selectedRequest ? (
+          <ServiceRequestDetail
+            request={selectedRequest}
+            token={session.accessToken}
+            canEdit={canOperate}
+            canReopen={isAdmin}
+            groups={groups}
+            currentUserId={session.user.id}
+            onClose={() => setSelectedRequest(null)}
+            onUpdated={(updated) => {
+              setSelectedRequest(updated);
+              setServiceRequests((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              );
+            }}
+            onOpenTask={(task) => {
+              setSelectedRequestTask({ request: selectedRequest, task });
+              setSelectedRequest(null);
+            }}
+          />
+        ) : selectedRequestTask ? (
+          <RequestTaskDetail
+            task={selectedRequestTask.task}
+            request={selectedRequestTask.request}
+            token={session.accessToken}
+            canEdit={canOperate}
+            groups={groups}
+            onClose={() => setSelectedRequestTask(null)}
+            onOpenRequest={() => {
+              setSelectedRequest(selectedRequestTask.request);
+              setSelectedRequestTask(null);
+            }}
+            onUpdated={(updated) => {
+              setSelectedRequestTask((current) => {
+                const nextTask = updated.serviceRequest?.tasks?.find((task) => task.id === current?.task.id) || current?.task;
+                return nextTask ? { request: updated, task: nextTask } : null;
+              });
+              setServiceRequests((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              );
+            }}
+          />
+        ) : selectedProblemTask ? (
+          <ProblemTaskDetail
+            task={selectedProblemTask.task}
+            problem={selectedProblemTask.problem}
+            token={session.accessToken}
+            canEdit={canOperate}
+            groups={groups}
+            onClose={() => setSelectedProblemTask(null)}
+            onBackToProblem={() => {
+              setSelectedProblem(selectedProblemTask.problem);
+              setSelectedProblemTask(null);
+            }}
+            onUpdated={(updated) => {
+              setSelectedProblemTask((current) => {
+                const nextTask = updated.problem?.tasks?.find((task) => task.id === current?.task.id) || current?.task;
+                return nextTask ? { problem: updated, task: nextTask } : null;
+              });
+              setProblems((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              );
+            }}
+          />
+        ) : selectedProblem ? (
+          <ProblemDetail
+            problem={selectedProblem}
+            token={session.accessToken}
+            canEdit={canOperate}
+            canReopen={canReopenProblem}
+            groups={groups}
+            onClose={() => setSelectedProblem(null)}
+            onUpdated={(updated) => {
+              setSelectedProblem(updated);
+              setProblems((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              );
+            }}
+            onOpenTask={(task) => {
+              setSelectedProblemTask({ problem: selectedProblem, task });
+              setSelectedProblem(null);
+            }}
+            onOpenIncident={(ticketId) => {
+              const incident = incidents.find((item) => item.id === ticketId);
+              if (incident) {
+                setSelected(incident);
+                setSelectedProblem(null);
+              }
+            }}
+          />
+        ) : selectedChange ? (
+          <ChangeDetail
+            change={selectedChange}
+            token={session.accessToken}
+            canEdit={canOperate}
+            canReopen={canReopenChange}
+            groups={groups}
+            onClose={() => setSelectedChange(null)}
+            onUpdated={(updated) => {
+              setSelectedChange(updated);
+              setChanges((items) =>
+                items.map((item) => (item.id === updated.id ? updated : item)),
+              );
+            }}
+          />
+        ) : activeModule === "CMDB" ? (
+          <CmdbModule
+            token={session.accessToken}
+            user={session.user}
+            onOpenTicket={(type, id) => {
+              if (type === "INCIDENT") {
+                const incident = incidents.find((item) => item.id === id);
+                if (incident) setSelected(incident);
+              } else if (type === "PROBLEM") {
+                const problem = problems.find((item) => item.id === id);
+                if (problem) setSelectedProblem(problem);
+              } else {
+                const change = changes.find((item) => item.id === id);
+                if (change) setSelectedChange(change);
+              }
+            }}
+          />
+        ) : (
+          <>
         <header>
           <div>
             <p className="eyebrow">
@@ -1774,7 +2487,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
             </p>
           </div>
           <button className="primary compact" onClick={() => activeModule === "REQUESTS" ? setCreatingRequest(true) : activeModule === "PROBLEMS" ? setCreatingProblem(true) : activeModule === "CHANGES" ? setCreatingChange(true) : setCreating(true)}>
-            {activeModule === "REQUESTS" ? "＋ New request" : activeModule === "PROBLEMS" ? "＋ New problem" : "＋ New incident"}
+            {activeModule === "REQUESTS" ? "New request" : activeModule === "PROBLEMS" ? "New problem" : activeModule === "CHANGES" ? "New change" : "New incident"}
           </button>
         </header>
         <section className="stats">
@@ -1795,7 +2508,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
           </article>
           <article>
             <span>Total</span>
-            <strong>{activeModule === "REQUESTS" ? requestStats.total : activeModule === "APPROVALS" ? approvalRequests.length : activeModule === "PROBLEMS" ? problemStats.total : activeModule === "CHANGES" ? changeStats.total : incidents.length}</strong>
+            <strong>{activeModule === "REQUESTS" ? requestStats.total : activeModule === "APPROVALS" ? approvalRequests.length : activeModule === "PROBLEMS" ? problemStats.total : activeModule === "CHANGES" ? changeStats.total : stats.total}</strong>
             <small>{activeModule === "REQUESTS" ? "All requests" : activeModule === "APPROVALS" ? "Awaiting you" : activeModule === "PROBLEMS" ? "All problems" : activeModule === "CHANGES" ? "All changes" : "All incidents"}</small>
           </article>
         </section>
@@ -1806,18 +2519,24 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
               <p>{activeModule === "REQUESTS" ? "Service requests for your scope" : activeModule === "APPROVALS" ? "Service requests assigned to you for approval" : activeModule === "PROBLEMS" ? "Problems for investigation and root cause tracking" : activeModule === "CHANGES" ? "Changes for planning, approval, and execution" : "All incidents in your organization"}</p>
             </div>
             <div className="queue-filters">
+              {!isCoreServiceRole && (
+                <select value={queueScope} onChange={(e) => setQueueScope(e.target.value as "MY_GROUPS" | "ALL")}>
+                  <option value="MY_GROUPS">My group queue</option>
+                  <option value="ALL">All tickets</option>
+                </select>
+              )}
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <option value="ALL">All statuses</option>
-                {[
+                {(activeModule === "PROBLEMS" ? problemStatusOptions : activeModule === "CHANGES" ? changeStatusOptions : [
                   "OPEN",
                   "IN_PROGRESS",
                   "AWAITING_CUSTOMER",
                   "RESOLVED",
                   "CLOSED",
-                ].map((value) => (
+                ]).map((value) => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
@@ -1852,53 +2571,48 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
                   </tr>
                 </thead>
                 <tbody>
-                  {queueItems.map((i) => (
-                    <tr key={i.id}>
-                      <td>
-                        <button
-                          className="ticket-link"
-                          onClick={() => activeModule === "REQUESTS" || activeModule === "APPROVALS" ? setSelectedRequest(i) : activeModule === "PROBLEMS" ? setSelectedProblem(i) : activeModule === "CHANGES" ? setSelectedChange(i) : setSelected(i)}
-                        >
-                          {i.ticketNumber}
-                        </button>
-                      </td>
-                      <td>
-                        <strong>{i.title}</strong>
-                        <small>
-                          {activeModule === "REQUESTS" || activeModule === "APPROVALS" ? i.serviceRequest?.catalogItem?.name || "Service request" : activeModule === "PROBLEMS" ? i.problem?.knownError ? "Known error" : "Root cause investigation" : activeModule === "CHANGES" ? `${i.change?.changeType || "NORMAL"} change - ${i.change?.risk || "MEDIUM"} risk` : i.incident?.affectedService || "General service"}
-                        </small>
-                      </td>
-                      <td>
-                        <span
-                          className={`badge ${i.status?.name.toLowerCase()}`}
-                        >
-                          {i.status?.name.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className={`priority ${i.priority?.name.toLowerCase()}`}
-                        >
-                          ● {i.priority?.name}
-                        </span>
-                      </td>
-                      <td>
-                        {i.assignedTo?.name || (
-                          <span className="muted">Unassigned</span>
-                        )}
-                      </td>
-                      <td>{new Date(i.createdAt).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
+                  {queueItems.map((item) => {
+                    const isRequestTask = activeModule === "REQUESTS" && "kind" in item && item.kind === "request-task";
+                    const ticket = activeModule === "REQUESTS" && "kind" in item ? item.ticket : item as Incident;
+                    const task = isRequestTask ? item.task : null;
+                    const number = task?.taskNumber || ticket.ticketNumber;
+                    const statusName = task?.status || ticket.status?.name || "OPEN";
+                    const assigneeName = task?.assignedTo?.name || ticket.assignedTo?.name;
+                    return (
+                      <tr key={isRequestTask ? task!.id : ticket.id} className={isRequestTask ? "task-queue-row" : ""}>
+                        <td>
+                          <button
+                            className="ticket-link"
+                            onClick={() => isRequestTask ? setSelectedRequestTask({ request: ticket, task: task! }) : activeModule === "REQUESTS" || activeModule === "APPROVALS" ? setSelectedRequest(ticket) : activeModule === "PROBLEMS" ? setSelectedProblem(ticket) : activeModule === "CHANGES" ? setSelectedChange(ticket) : setSelected(ticket)}
+                          >
+                            {number}
+                          </button>
+                        </td>
+                        <td>
+                          <strong>{task?.title || ticket.title}</strong>
+                          <small>
+                            {isRequestTask ? `${task?.description || "Request task"} - Parent ${ticket.ticketNumber}` : activeModule === "REQUESTS" || activeModule === "APPROVALS" ? ticket.serviceRequest?.catalogItem?.name || "Service request" : activeModule === "PROBLEMS" ? ticket.problem?.knownError ? "Known error" : "Root cause investigation" : activeModule === "CHANGES" ? `${ticket.change?.changeType || "NORMAL"} change - ${ticket.change?.risk || "MEDIUM"} risk` : ticket.incident?.affectedService || "General service"}
+                          </small>
+                        </td>
+                        <td><span className={`badge ${statusName.toLowerCase()}`}>{statusName.replaceAll("_", " ")}</span></td>
+                        <td><span className={`priority priority-pill ${ticket.priority?.name.toLowerCase()}`}>{ticket.priority?.name || "MEDIUM"}</span></td>
+                        <td>{assigneeName || <span className="muted">Unassigned</span>}</td>
+                        <td>{new Date(task?.createdAt || ticket.createdAt).toLocaleDateString()}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </section>
+          </>
+        )}
       </main>
       {creating && (
         <CreateIncident
           token={session.accessToken}
+          currentUser={session.user}
           onClose={() => setCreating(false)}
           onCreated={(i) => {
             setIncidents((x) => [i, ...x]);
@@ -1909,6 +2623,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
       {creatingRequest && (
         <CreateServiceRequest
           token={session.accessToken}
+          currentUser={session.user}
           catalog={catalog}
           onClose={() => setCreatingRequest(false)}
           onCreated={(request) => {
@@ -1938,72 +2653,6 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
             setChanges((x) => [change, ...x]);
             setCreatingChange(false);
             setActiveModule("CHANGES");
-          }}
-        />
-      )}
-      {selected && (
-        <IncidentDetail
-          incident={selected}
-          token={session.accessToken}
-          groups={groups}
-          canEdit={canOperate}
-          canReopen={isAdmin}
-          onClose={() => setSelected(null)}
-          onUpdated={(updated) => {
-            setSelected(updated);
-            setIncidents((items) =>
-              items.map((item) => (item.id === updated.id ? updated : item)),
-            );
-          }}
-        />
-      )}
-      {selectedRequest && (
-        <ServiceRequestDetail
-          request={selectedRequest}
-          token={session.accessToken}
-          canEdit={canOperate}
-          canReopen={isAdmin}
-          groups={groups}
-          currentUserId={session.user.id}
-          onClose={() => setSelectedRequest(null)}
-          onUpdated={(updated) => {
-            setSelectedRequest(updated);
-            setServiceRequests((items) =>
-              items.map((item) => (item.id === updated.id ? updated : item)),
-            );
-          }}
-        />
-      )}
-      {selectedProblem && (
-        <ProblemDetail
-          problem={selectedProblem}
-          token={session.accessToken}
-          canEdit={canOperate}
-          canReopen={isAdmin}
-          groups={groups}
-          onClose={() => setSelectedProblem(null)}
-          onUpdated={(updated) => {
-            setSelectedProblem(updated);
-            setProblems((items) =>
-              items.map((item) => (item.id === updated.id ? updated : item)),
-            );
-          }}
-        />
-      )}
-
-      {selectedChange && (
-        <ChangeDetail
-          change={selectedChange}
-          token={session.accessToken}
-          canEdit={canOperate}
-          canReopen={isAdmin}
-          groups={groups}
-          onClose={() => setSelectedChange(null)}
-          onUpdated={(updated) => {
-            setSelectedChange(updated);
-            setChanges((items) =>
-              items.map((item) => (item.id === updated.id ? updated : item)),
-            );
           }}
         />
       )}

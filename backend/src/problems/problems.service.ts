@@ -1,11 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user';
+import { Roles } from '../auth/roles';
 import { employeeTicketScope, requireServiceDeskRole } from '../common/ticket-access.policy';
-import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
-import { AddCommentDto, AssignIncidentDto, ChangeStatusDto } from '../incidents/dto/incident-actions.dto';
+import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateProblemDto, CreateProblemTaskDto, UpdateProblemDto, UpdateProblemTaskDto } from './dto/problem.dto';
+import { ChangeProblemStatusDto, CreateProblemDto, CreateProblemTaskDto, UpdateProblemDto, UpdateProblemTaskDto } from './dto/problem.dto';
 
 const problemInclude = {
   status: true,
@@ -14,6 +14,7 @@ const problemInclude = {
   createdBy: { select: { id: true, name: true, email: true } },
   assignedTo: { select: { id: true, name: true, email: true } },
   assignmentGroup: { select: { id: true, name: true } },
+  ticketConfigurationItems: { include: { configurationItem: { include: { ciType: true } } }, orderBy: { createdAt: 'asc' as const } },
   problem: { include: { tasks: { include: { assignmentGroup: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' as const } } } },
   activities: { include: { createdBy: { select: { id: true, name: true } }, activityType: true }, orderBy: { createdAt: 'desc' as const } },
   slas: { include: { definition: { select: { id: true, name: true, version: true } } }, orderBy: { createdAt: 'desc' as const } },
@@ -25,11 +26,12 @@ export class ProblemsService {
 
   async create(user: AuthUser, dto: CreateProblemDto) {
     requireServiceDeskRole(user);
-    const [dbUser, status, type, priority] = await Promise.all([
+    const [dbUser, status, type, priority, configurationItem] = await Promise.all([
       this.prisma.user.findFirst({ where: { id: user.id, organizationId: user.organizationId } }),
       this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'OPEN' } } }),
       this.prisma.ticketType.findUnique({ where: { name: 'PROBLEM' } }),
       this.prisma.priority.findUnique({ where: { name: dto.priority } }),
+      dto.configurationItemId ? this.ensureConfigurationItem(user.organizationId, dto.configurationItemId) : Promise.resolve(null),
     ]);
     if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
     if (!status || !type || !priority) throw new BadRequestException('Required problem lookup data is missing');
@@ -51,41 +53,50 @@ export class ProblemsService {
           statusId: status.id,
           ticketTypeId: type.id,
           priorityId: priority.id,
-          problem: { create: { rootCause: dto.rootCause, workaround: dto.workaround, permanentFix: dto.permanentFix, knownError: dto.knownError ?? false } },
+          problem: { create: { rootCause: dto.rootCause, workaround: dto.workaround, permanentFix: dto.permanentFix, impact: dto.impact, risk: dto.risk, knownError: dto.knownError ?? false } },
         },
         include: problemInclude,
       });
+      if (configurationItem) await tx.ticketConfigurationItem.create({ data: { ticketId: ticket.id, ciId: configurationItem.id } });
       await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE_PROBLEM', newValue: { ticketNumber, title: ticket.title }, changedById: user.id } });
-      return ticket;
+      return this.withConfigurationItem(ticket);
     });
   }
 
-  findAll(user: AuthUser) {
-    return this.prisma.ticket.findMany({ where: { organizationId: user.organizationId, ticketType: { name: 'PROBLEM' }, ...employeeTicketScope(user) }, include: problemInclude, orderBy: { createdAt: 'desc' } });
+  async findAll(user: AuthUser) {
+    const values = await this.prisma.ticket.findMany({ where: { organizationId: user.organizationId, ticketType: { name: 'PROBLEM' }, ...employeeTicketScope(user) }, include: problemInclude, orderBy: { createdAt: 'desc' } });
+    return values.map((ticket) => this.withConfigurationItem(ticket));
   }
 
   async findOne(user: AuthUser, id: string) {
     const ticket = await this.prisma.ticket.findFirst({ where: { id, organizationId: user.organizationId, ticketType: { name: 'PROBLEM' }, ...employeeTicketScope(user) }, include: problemInclude });
     if (!ticket) throw new NotFoundException('Problem not found');
-    return ticket;
+    return this.withConfigurationItem(ticket);
   }
 
   async update(user: AuthUser, id: string, dto: UpdateProblemDto) {
     requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
+    this.assertProblemEditable(ticket.status?.name);
     const priority = dto.priority ? await this.prisma.priority.findUnique({ where: { name: dto.priority } }) : null;
     if (dto.priority && !priority) throw new BadRequestException('Unknown priority');
+    const configurationItem = dto.configurationItemId ? await this.ensureConfigurationItem(ticket.organizationId, dto.configurationItemId) : null;
     return this.prisma.$transaction(async (tx) => {
-      await tx.problem.update({ where: { ticketId: id }, data: { rootCause: dto.rootCause, workaround: dto.workaround, permanentFix: dto.permanentFix, knownError: dto.knownError } });
+      await tx.problem.update({ where: { ticketId: id }, data: { rootCause: dto.rootCause, workaround: dto.workaround, permanentFix: dto.permanentFix, impact: dto.impact, risk: dto.risk, knownError: dto.knownError } });
       const updated = await tx.ticket.update({ where: { id }, data: { title: dto.title, description: dto.description, priorityId: priority?.id, updatedAt: new Date() }, include: problemInclude });
+      if (dto.configurationItemId !== undefined) {
+        await tx.ticketConfigurationItem.deleteMany({ where: { ticketId: id } });
+        if (configurationItem) await tx.ticketConfigurationItem.create({ data: { ticketId: id, ciId: configurationItem.id } });
+      }
       await tx.auditLog.create({ data: { organizationId: ticket.organizationId, tableName: 'tickets', recordId: id, action: 'UPDATE_PROBLEM', newValue: dto as Prisma.InputJsonValue, changedById: user.id } });
-      return updated;
+      return this.withConfigurationItem(updated);
     });
   }
 
   async assign(user: AuthUser, id: string, dto: AssignIncidentDto) {
     requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
+    this.assertProblemEditable(ticket.status?.name);
     const group = await this.ensureGroup(ticket.organizationId, dto.assignmentGroupId);
     const membership = await this.prisma.assignmentGroupMember.findUnique({ where: { assignmentGroupId_userId: { assignmentGroupId: dto.assignmentGroupId, userId: dto.assignedToId } } });
     if (!membership) throw new BadRequestException('Assignee must be a member of the assignment group');
@@ -96,10 +107,10 @@ export class ProblemsService {
     });
   }
 
-  async changeStatus(user: AuthUser, id: string, dto: ChangeStatusDto) {
+  async changeStatus(user: AuthUser, id: string, dto: ChangeProblemStatusDto) {
     requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
-    enforceClosedTicketPolicy(user, ticket.status?.name, dto.status);
+    this.assertProblemStatusTransitionAllowed(user, ticket.status?.name, dto.status);
     const status = await this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: dto.status } } });
     if (!status) throw new BadRequestException(`Unknown ticket status: ${dto.status}`);
     return this.prisma.$transaction(async (tx) => {
@@ -111,7 +122,8 @@ export class ProblemsService {
   }
 
   async addComment(user: AuthUser, id: string, dto: AddCommentDto) {
-    await this.findOne(user, id);
+    const ticket = await this.findOne(user, id);
+    if (ticket.status?.name === 'CLOSED') throw new BadRequestException('Closed problems are locked and cannot be edited');
     if (dto.type === 'WORK_NOTE') requireServiceDeskRole(user);
     const activityType = await this.prisma.activityType.findUnique({ where: { name: dto.type } });
     return this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: dto.comment, activityTypeId: activityType?.id } });
@@ -120,6 +132,7 @@ export class ProblemsService {
   async createTask(user: AuthUser, id: string, dto: CreateProblemTaskDto) {
     requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
+    this.assertProblemEditable(ticket.status?.name);
     if (!ticket.problem) throw new NotFoundException('Problem not found');
     if (dto.assignmentGroupId) await this.ensureGroup(ticket.organizationId, dto.assignmentGroupId);
     if (dto.assignedToId) await this.ensureUser(ticket.organizationId, dto.assignedToId);
@@ -139,14 +152,27 @@ export class ProblemsService {
   async updateTask(user: AuthUser, id: string, taskId: string, dto: UpdateProblemTaskDto) {
     requireServiceDeskRole(user);
     const ticket = await this.findOne(user, id);
+    this.assertProblemEditable(ticket.status?.name);
     if (!ticket.problem) throw new NotFoundException('Problem not found');
     const task = await this.prisma.problemTask.findFirst({ where: { id: taskId, problemId: ticket.problem.id } });
     if (!task) throw new NotFoundException('Problem task not found');
     if (dto.assignmentGroupId) await this.ensureGroup(ticket.organizationId, dto.assignmentGroupId);
     if (dto.assignedToId) await this.ensureUser(ticket.organizationId, dto.assignedToId);
     await this.prisma.problemTask.update({ where: { id: taskId }, data: { title: dto.title, description: dto.description, assignmentGroupId: dto.assignmentGroupId, assignedToId: dto.assignedToId, status: dto.status, completedAt: dto.status === 'COMPLETED' ? new Date() : dto.status ? null : undefined, updatedAt: new Date() } });
-    await this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Problem task ${task.taskNumber} updated${dto.status ? ` to ${dto.status}` : ''}` } });
+    await this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: dto.workNote?.trim() ? `${task.taskNumber}: ${dto.workNote.trim()}` : `Problem task ${task.taskNumber} updated${dto.status ? ` to ${dto.status}` : ''}` } });
     return this.findOne(user, id);
+  }
+
+  private assertProblemStatusTransitionAllowed(user: AuthUser, currentStatus: string | undefined, nextStatus: string) {
+    if (currentStatus !== 'CLOSED') return;
+    if (nextStatus === 'CLOSED') return;
+    if (!user.roles.includes(Roles.Admin) && !user.roles.includes(Roles.ServiceManager)) {
+      throw new BadRequestException('Only IT Service Managers and administrators can reopen a closed problem');
+    }
+  }
+
+  private assertProblemEditable(currentStatus: string | undefined) {
+    if (currentStatus === 'CLOSED') throw new BadRequestException('Closed problems are locked and cannot be edited. Reopen first.');
   }
 
   private async ensureGroup(organizationId: string, id: string) {
@@ -159,5 +185,16 @@ export class ProblemsService {
     const user = await this.prisma.user.findFirst({ where: { id, organizationId, active: true } });
     if (!user) throw new BadRequestException('Assignee must be an active user in this organization');
     return user;
+  }
+
+  private async ensureConfigurationItem(organizationId: string, id: string) {
+    const item = await this.prisma.configurationItem.findFirst({ where: { id, organizationId } });
+    if (!item) throw new BadRequestException('Configuration item does not belong to this organization');
+    return item;
+  }
+
+  private withConfigurationItem<T extends { ticketConfigurationItems?: { configurationItem: { id: string; name: string; ciType?: { name: string } | null } }[] }>(ticket: T) {
+    const item = ticket.ticketConfigurationItems?.[0]?.configurationItem;
+    return { ...ticket, configurationItem: item ? { id: item.id, name: item.name, ciType: item.ciType?.name } : undefined };
   }
 }

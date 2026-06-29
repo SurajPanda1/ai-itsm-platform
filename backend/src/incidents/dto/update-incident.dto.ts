@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class UpdateIncidentDto {
   @IsOptional() @IsString() @MinLength(3) @MaxLength(200)
@@ -18,4 +18,7 @@ export class UpdateIncidentDto {
 
   @IsOptional() @IsString() @MaxLength(100)
   affectedService?: string;
+
+  @IsOptional() @IsUUID()
+  configurationItemId?: string;
 }

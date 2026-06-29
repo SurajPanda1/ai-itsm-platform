@@ -2,13 +2,18 @@ import { FormEvent, useEffect, useState } from "react";
 import { api } from "./api";
 import type {
   AdminGroup,
+  AdminCmdbSettings,
   AdminUser,
+  ChangeApprovalRule,
   OrganizationSettings,
   ReferenceData,
   ServiceCatalogCategory,
   ServiceCatalogItem,
   ServiceApprovalRule,
   SlaDefinition,
+  CmdbCategory,
+  CmdbRelationshipTypeLookup,
+  CmdbType,
 } from "./types";
 import { rawTimeZones } from "@vvo/tzdb";
 
@@ -40,6 +45,7 @@ const defaultSettings: OrganizationSettings = {
     maxFileSizeMb: 10,
   },
 };
+const changeGroupApprovalTypes = ["GROUP", "CAB", "SECURITY", "ITAM"];
 
 function CalendarEditor({
   token,
@@ -170,13 +176,15 @@ export default function AdminConsole({
   token: string;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"users" | "groups" | "catalog" | "slas" | "settings">(
+  const [tab, setTab] = useState<"users" | "groups" | "catalog" | "change-approvals" | "cmdb-settings" | "slas" | "settings">(
     "users",
   );
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [slas, setSlas] = useState<SlaDefinition[]>([]);
   const [catalog, setCatalog] = useState<ServiceCatalogCategory[]>([]);
+  const [changeApprovalRules, setChangeApprovalRules] = useState<ChangeApprovalRule[]>([]);
+  const [cmdbSettings, setCmdbSettings] = useState<AdminCmdbSettings>({ categories: [], types: [], relationshipTypes: [] });
   const [settings, setSettings] = useState(defaultSettings);
   const [reference, setReference] = useState(emptyReference);
   const [page, setPage] = useState(1);
@@ -195,6 +203,8 @@ export default function AdminConsole({
   const [usersPanel, setUsersPanel] = useState<"add-user" | "user-list" | "edit-user" | "add-department" | "department-list" | "edit-department">("user-list");
   const [groupsPanel, setGroupsPanel] = useState<"add-group" | "group-list" | "edit-group">("group-list");
   const [catalogPanel, setCatalogPanel] = useState<"add-category" | "add-item" | "add-approval" | "approval-list" | "edit-approval" | "catalog-list" | "category-items" | "edit-category" | "edit-item">("catalog-list");
+  const [changeApprovalPanel, setChangeApprovalPanel] = useState<"add-rule" | "rule-list" | "edit-rule">("rule-list");
+  const [cmdbPanel, setCmdbPanel] = useState<"categories" | "types" | "relationship-types">("categories");
   const [slaPanel, setSlaPanel] = useState<"add-sla" | "add-calendar" | "sla-list" | "edit-sla">("sla-list");
   const [settingsPanel, setSettingsPanel] = useState<"branding" | "storage">("branding");
   const [editingGroup, setEditingGroup] = useState<AdminGroup | null>(null);
@@ -218,6 +228,8 @@ export default function AdminConsole({
   const [editCategory, setEditCategory] = useState({ name: "", description: "" });
   const [editingApprovalRule, setEditingApprovalRule] = useState<ServiceApprovalRule | null>(null);
   const [editApprovalRule, setEditApprovalRule] = useState({ catalogItemId: "", sequence: 1, approvalType: "MANAGER", approvalGroupId: "", specificApproverId: "", active: true });
+  const [editingChangeApprovalRule, setEditingChangeApprovalRule] = useState<ChangeApprovalRule | null>(null);
+  const [editChangeApprovalRule, setEditChangeApprovalRule] = useState({ sequence: 1, approvalType: "CAB", approvalGroupId: "", specificApproverId: "", active: true });
   const [fieldDraft, setFieldDraft] = useState({ key: "", label: "", type: "text", required: false });
   const [taskDraft, setTaskDraft] = useState({ title: "", description: "", assignmentGroupId: "" });
   const [newDepartment, setNewDepartment] = useState({ name: "", description: "" });
@@ -240,6 +252,15 @@ export default function AdminConsole({
     approvalGroupId: "",
     specificApproverId: "",
   });
+  const [newChangeApprovalRule, setNewChangeApprovalRule] = useState({
+    sequence: 1,
+    approvalType: "CAB",
+    approvalGroupId: "",
+    specificApproverId: "",
+  });
+  const [newCiCategory, setNewCiCategory] = useState({ name: "", description: "" });
+  const [newCiType, setNewCiType] = useState({ categoryId: "", name: "", description: "" });
+  const [newCiRelationshipType, setNewCiRelationshipType] = useState({ name: "", description: "" });
   const [newSla, setNewSla] = useState({
     name: "",
     ticketTypeId: "",
@@ -253,13 +274,15 @@ export default function AdminConsole({
   const [calendarTimezone, setCalendarTimezone] = useState("Asia/Kolkata");
   async function load() {
     try {
-      const [u, g, r, s, o, c] = await Promise.all([
+      const [u, g, r, s, o, c, car, cmdb] = await Promise.all([
         api.adminUsers(token, page, search),
         api.adminGroups(token, groupPage, groupSearch, groupActive),
         api.adminReferenceData(token),
         api.adminSlas(token),
         api.organizationSettings(token),
         api.serviceCatalog(token),
+        api.adminChangeApprovalRules(token),
+        api.adminCmdbSettings(token),
       ]);
       setUsers(u.data);
       setTotal(u.total);
@@ -270,6 +293,8 @@ export default function AdminConsole({
       setReference(r);
       setSlas(s);
       setCatalog(c);
+      setChangeApprovalRules(car);
+      setCmdbSettings(cmdb);
       setSettings({
         organizationName: o.organizationName,
         branding: { ...defaultSettings.branding, ...o.branding },
@@ -290,6 +315,14 @@ export default function AdminConsole({
       setNewApprovalRule((value) => ({
         ...value,
         catalogItemId: value.catalogItemId || c.flatMap((category) => category.items)[0]?.id || "",
+      }));
+      setNewChangeApprovalRule((value) => ({
+        ...value,
+        sequence: value.sequence || ((car[0]?.sequence ?? 0) + 1),
+      }));
+      setNewCiType((value) => ({
+        ...value,
+        categoryId: value.categoryId || cmdb.categories.find((category) => category.active !== false)?.id || cmdb.categories[0]?.id || "",
       }));
     } catch (reason) {
       setError(
@@ -386,6 +419,17 @@ export default function AdminConsole({
       active: rule.active,
     });
     setCatalogPanel("edit-approval");
+  }
+  function startEditChangeApprovalRule(rule: ChangeApprovalRule) {
+    setEditingChangeApprovalRule(rule);
+    setEditChangeApprovalRule({
+      sequence: rule.sequence,
+      approvalType: rule.approvalType,
+      approvalGroupId: rule.approvalGroupId || rule.approvalGroup?.id || "",
+      specificApproverId: rule.specificApproverId || rule.specificApprover?.id || "",
+      active: rule.active,
+    });
+    setChangeApprovalPanel("edit-rule");
   }
   function startEditSla(sla: SlaDefinition) {
     setEditingSla(sla);
@@ -639,6 +683,87 @@ export default function AdminConsole({
       setBusy(false);
     }
   }
+  async function createChangeApprovalRule(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api.createChangeApprovalRule(token, {
+        sequence: newChangeApprovalRule.sequence,
+        approvalType: newChangeApprovalRule.approvalType,
+        approvalGroupId: changeGroupApprovalTypes.includes(newChangeApprovalRule.approvalType) ? newChangeApprovalRule.approvalGroupId : undefined,
+        specificApproverId: newChangeApprovalRule.approvalType === "SPECIFIC_USER" ? newChangeApprovalRule.specificApproverId : undefined,
+      });
+      setNewChangeApprovalRule((value) => ({ ...value, sequence: value.sequence + 1 }));
+      setChangeApprovalPanel("rule-list");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create change approval rule");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveChangeApprovalRuleEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingChangeApprovalRule) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateChangeApprovalRule(token, editingChangeApprovalRule.id, {
+        sequence: editChangeApprovalRule.sequence,
+        approvalType: editChangeApprovalRule.approvalType,
+        approvalGroupId: changeGroupApprovalTypes.includes(editChangeApprovalRule.approvalType) ? editChangeApprovalRule.approvalGroupId : undefined,
+        specificApproverId: editChangeApprovalRule.approvalType === "SPECIFIC_USER" ? editChangeApprovalRule.specificApproverId : undefined,
+        active: editChangeApprovalRule.active,
+      });
+      setEditingChangeApprovalRule(null);
+      setChangeApprovalPanel("rule-list");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update change approval rule");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createCiCategory(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(""); setSaved("");
+    try { await api.createCiCategory(token, newCiCategory); setNewCiCategory({ name: "", description: "" }); setSaved("CI category saved."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save CI category"); }
+    finally { setBusy(false); }
+  }
+  async function updateCiCategory(category: CmdbCategory, input: Partial<CmdbCategory>) {
+    setBusy(true); setError(""); setSaved("");
+    try { await api.updateCiCategory(token, category.id, input); setSaved("CI category updated."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update CI category"); }
+    finally { setBusy(false); }
+  }
+  async function createCiType(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(""); setSaved("");
+    try { await api.createCiType(token, newCiType); setNewCiType({ categoryId: newCiType.categoryId, name: "", description: "" }); setSaved("CI type saved."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save CI type"); }
+    finally { setBusy(false); }
+  }
+  async function updateCiType(type: CmdbType, input: Partial<CmdbType>) {
+    setBusy(true); setError(""); setSaved("");
+    try { await api.updateCiType(token, type.id, input); setSaved("CI type updated."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update CI type"); }
+    finally { setBusy(false); }
+  }
+  async function createCiRelationshipType(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(""); setSaved("");
+    try { await api.createCiRelationshipType(token, newCiRelationshipType); setNewCiRelationshipType({ name: "", description: "" }); setSaved("Relationship type saved."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save relationship type"); }
+    finally { setBusy(false); }
+  }
+  async function updateCiRelationshipType(type: CmdbRelationshipTypeLookup, input: Partial<CmdbRelationshipTypeLookup>) {
+    setBusy(true); setError(""); setSaved("");
+    try { await api.updateCiRelationshipType(token, type.id, input); setSaved("Relationship type updated."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update relationship type"); }
+    finally { setBusy(false); }
+  }
   async function createSla(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -760,6 +885,18 @@ export default function AdminConsole({
             onClick={() => setTab("catalog")}
           >
             Service Catalogue
+          </button>
+          <button
+            className={tab === "change-approvals" ? "active" : ""}
+            onClick={() => setTab("change-approvals")}
+          >
+            Change Approvals
+          </button>
+          <button
+            className={tab === "cmdb-settings" ? "active" : ""}
+            onClick={() => setTab("cmdb-settings")}
+          >
+            CMDB Settings
           </button>
           <button
             className={tab === "slas" ? "active" : ""}
@@ -1504,6 +1641,109 @@ export default function AdminConsole({
                 </>;
               })()}
             </div>}
+          </div>
+        )}
+        {tab === "change-approvals" && (
+          <div className="admin-grid">
+            <div className="admin-form-stack">
+              <div className="admin-form admin-card-menu">
+                <button type="button" className={changeApprovalPanel === "add-rule" ? "secondary active" : "secondary"} onClick={() => setChangeApprovalPanel("add-rule")}>Add Approval Step</button>
+                <button type="button" className={["rule-list", "edit-rule"].includes(changeApprovalPanel) ? "secondary active" : "secondary"} onClick={() => setChangeApprovalPanel("rule-list")}>Approval Step List</button>
+              </div>
+              {changeApprovalPanel === "add-rule" && <form className="admin-form" onSubmit={createChangeApprovalRule}>
+                <h2>Add change approval step</h2>
+                <p className="muted">These active steps are copied to every new change. Use sequence to define the approval order.</p>
+                <label>Sequence<input type="number" min={1} value={newChangeApprovalRule.sequence} onChange={(e) => setNewChangeApprovalRule({ ...newChangeApprovalRule, sequence: Number(e.target.value) })} /></label>
+                <label>Approval type<select value={newChangeApprovalRule.approvalType} onChange={(e) => setNewChangeApprovalRule({ ...newChangeApprovalRule, approvalType: e.target.value, approvalGroupId: "", specificApproverId: "" })}>
+                  <option value="CAB">CAB approval</option>
+                  <option value="GROUP">Approval group</option>
+                  <option value="SPECIFIC_USER">Specific user</option>
+                  <option value="MANAGER">Requester's manager</option>
+                  <option value="SECURITY">Information Security</option>
+                  <option value="ITAM">ITAM approval</option>
+                </select></label>
+                {changeGroupApprovalTypes.includes(newChangeApprovalRule.approvalType) && <label>Approval group<select required value={newChangeApprovalRule.approvalGroupId} onChange={(e) => setNewChangeApprovalRule({ ...newChangeApprovalRule, approvalGroupId: e.target.value })}><option value="">Select approval group</option>{groups.filter((group) => group.active && ["APPROVAL", "BOTH"].includes(group.groupType || "")).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
+                {newChangeApprovalRule.approvalType === "SPECIFIC_USER" && <label>Approver<select required value={newChangeApprovalRule.specificApproverId} onChange={(e) => setNewChangeApprovalRule({ ...newChangeApprovalRule, specificApproverId: e.target.value })}><option value="">Select approver</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
+                <button className="primary" disabled={busy}>Create approval step</button>
+              </form>}
+              {editingChangeApprovalRule && changeApprovalPanel === "edit-rule" && <form className="admin-form" onSubmit={saveChangeApprovalRuleEdit}>
+                <h2>Edit change approval step</h2>
+                <label>Sequence<input type="number" min={1} value={editChangeApprovalRule.sequence} onChange={(e) => setEditChangeApprovalRule({ ...editChangeApprovalRule, sequence: Number(e.target.value) })} /></label>
+                <label>Approval type<select value={editChangeApprovalRule.approvalType} onChange={(e) => setEditChangeApprovalRule({ ...editChangeApprovalRule, approvalType: e.target.value, approvalGroupId: "", specificApproverId: "" })}>
+                  <option value="CAB">CAB approval</option>
+                  <option value="GROUP">Approval group</option>
+                  <option value="SPECIFIC_USER">Specific user</option>
+                  <option value="MANAGER">Requester's manager</option>
+                  <option value="SECURITY">Information Security</option>
+                  <option value="ITAM">ITAM approval</option>
+                </select></label>
+                {changeGroupApprovalTypes.includes(editChangeApprovalRule.approvalType) && <label>Approval group<select required value={editChangeApprovalRule.approvalGroupId} onChange={(e) => setEditChangeApprovalRule({ ...editChangeApprovalRule, approvalGroupId: e.target.value })}><option value="">Select approval group</option>{groups.filter((group) => group.active && ["APPROVAL", "BOTH"].includes(group.groupType || "")).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
+                {editChangeApprovalRule.approvalType === "SPECIFIC_USER" && <label>Approver<select required value={editChangeApprovalRule.specificApproverId} onChange={(e) => setEditChangeApprovalRule({ ...editChangeApprovalRule, specificApproverId: e.target.value })}><option value="">Select approver</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
+                <label className="check-row"><input type="checkbox" checked={editChangeApprovalRule.active} onChange={(e) => setEditChangeApprovalRule({ ...editChangeApprovalRule, active: e.target.checked })} />Active</label>
+                <div className="modal-actions"><button type="button" className="secondary" onClick={() => { setEditingChangeApprovalRule(null); setChangeApprovalPanel("rule-list"); }}>Cancel</button><button className="primary" disabled={busy}>Save approval step</button></div>
+              </form>}
+            </div>
+            {changeApprovalPanel === "rule-list" && <div className="admin-list">
+              <h2>Change Approval Steps <span>{changeApprovalRules.length}</span></h2>
+              <p className="muted">Active steps are applied to newly created changes. Existing changes keep their already-generated approval list.</p>
+              {changeApprovalRules.length === 0 && <p className="muted">No change approval process configured yet.</p>}
+              <div className="catalog-items">
+                {changeApprovalRules.map((rule) => (
+                  <div className="catalog-item-row" key={rule.id}>
+                    <div>
+                      <b>Step {rule.sequence} · {rule.approvalType.replace("_", " ")}</b>
+                      <small>{changeGroupApprovalTypes.includes(rule.approvalType) ? rule.approvalGroup?.name || "Approval group missing" : rule.approvalType === "SPECIFIC_USER" ? rule.specificApprover?.name || "Specific approver missing" : "Requester's manager"}</small>
+                      <small>{rule.active ? "Active" : "Inactive"}</small>
+                    </div>
+                    <button className="secondary small" onClick={() => startEditChangeApprovalRule(rule)}>Edit</button>
+                  </div>
+                ))}
+              </div>
+            </div>}
+          </div>
+        )}
+        {tab === "cmdb-settings" && (
+          <div className="admin-grid">
+            <div className="admin-form-stack">
+              <div className="admin-form admin-card-menu">
+                <button type="button" className={cmdbPanel === "categories" ? "secondary active" : "secondary"} onClick={() => setCmdbPanel("categories")}>CI Categories</button>
+                <button type="button" className={cmdbPanel === "types" ? "secondary active" : "secondary"} onClick={() => setCmdbPanel("types")}>CI Types</button>
+                <button type="button" className={cmdbPanel === "relationship-types" ? "secondary active" : "secondary"} onClick={() => setCmdbPanel("relationship-types")}>Relationship Types</button>
+              </div>
+              {cmdbPanel === "categories" && <form className="admin-form" onSubmit={createCiCategory}>
+                <h2>Add CI Category</h2>
+                <label>Name<input required value={newCiCategory.name} onChange={(e) => setNewCiCategory({ ...newCiCategory, name: e.target.value })} /></label>
+                <label>Description<textarea rows={3} value={newCiCategory.description} onChange={(e) => setNewCiCategory({ ...newCiCategory, description: e.target.value })} /></label>
+                <button className="primary" disabled={busy}>Save category</button>
+              </form>}
+              {cmdbPanel === "types" && <form className="admin-form" onSubmit={createCiType}>
+                <h2>Add CI Type</h2>
+                <label>Category<select required value={newCiType.categoryId} onChange={(e) => setNewCiType({ ...newCiType, categoryId: e.target.value })}>{cmdbSettings.categories.filter((category) => category.active !== false).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+                <label>Name<input required value={newCiType.name} onChange={(e) => setNewCiType({ ...newCiType, name: e.target.value })} /></label>
+                <label>Description<textarea rows={3} value={newCiType.description} onChange={(e) => setNewCiType({ ...newCiType, description: e.target.value })} /></label>
+                <button className="primary" disabled={busy || !newCiType.categoryId}>Save type</button>
+              </form>}
+              {cmdbPanel === "relationship-types" && <form className="admin-form" onSubmit={createCiRelationshipType}>
+                <h2>Add Relationship Type</h2>
+                <label>Name<input required value={newCiRelationshipType.name} onChange={(e) => setNewCiRelationshipType({ ...newCiRelationshipType, name: e.target.value })} /></label>
+                <label>Description<textarea rows={3} value={newCiRelationshipType.description} onChange={(e) => setNewCiRelationshipType({ ...newCiRelationshipType, description: e.target.value })} /></label>
+                <button className="primary" disabled={busy}>Save relationship type</button>
+              </form>}
+            </div>
+            <div className="admin-list">
+              {cmdbPanel === "categories" && <>
+                <h2>CI Categories</h2>
+                {cmdbSettings.categories.map((category) => <article key={category.id}><div><input defaultValue={category.name} onBlur={(e) => e.target.value !== category.name && updateCiCategory(category, { name: e.target.value })} /><small><input defaultValue={category.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (category.description || "") && updateCiCategory(category, { description: e.target.value })} /></small></div><button className="secondary small" disabled={busy} onClick={() => updateCiCategory(category, { active: category.active === false })}>{category.active === false ? "Activate" : "Deactivate"}</button></article>)}
+              </>}
+              {cmdbPanel === "types" && <>
+                <h2>CI Types</h2>
+                {cmdbSettings.types.map((type) => <article key={type.id}><div><input defaultValue={type.name} onBlur={(e) => e.target.value !== type.name && updateCiType(type, { name: e.target.value })} /><small><input defaultValue={type.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (type.description || "") && updateCiType(type, { description: e.target.value })} /></small></div><select value={type.categoryId} disabled={busy} onChange={(e) => updateCiType(type, { categoryId: e.target.value })}>{cmdbSettings.categories.filter((category) => category.active !== false).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button className="secondary small" disabled={busy} onClick={() => updateCiType(type, { active: type.active === false })}>{type.active === false ? "Activate" : "Deactivate"}</button></article>)}
+              </>}
+              {cmdbPanel === "relationship-types" && <>
+                <h2>Relationship Types</h2>
+                {cmdbSettings.relationshipTypes.map((type) => <article key={type.id}><div><input defaultValue={type.name} onBlur={(e) => e.target.value !== type.name && updateCiRelationshipType(type, { name: e.target.value })} /><small><input defaultValue={type.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (type.description || "") && updateCiRelationshipType(type, { description: e.target.value })} /></small></div><button className="secondary small" disabled={busy} onClick={() => updateCiRelationshipType(type, { active: type.active === false })}>{type.active === false ? "Activate" : "Deactivate"}</button></article>)}
+              </>}
+            </div>
           </div>
         )}
         {tab === "slas" && (

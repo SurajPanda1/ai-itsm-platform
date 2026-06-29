@@ -19,12 +19,13 @@ export class RelatedItemsController {
       SELECT * FROM (
         SELECT tr.id, tr.relationship_type AS "relationshipType", 'OUTBOUND' AS direction,
                tr.created_at AS "createdAt", t.id AS "ticketId", t.ticket_number AS "ticketNumber",
-               t.title, s.name AS status, tt.name AS "ticketType"
+               t.title, s.name AS status, tt.name AS "ticketType", ag.name AS "assignmentGroup"
         FROM ticket_relationships tr
         JOIN tickets parent ON parent.id = tr.parent_ticket_id
         JOIN tickets t ON t.id = tr.related_ticket_id
         LEFT JOIN statuses s ON s.id = t.status_id
         LEFT JOIN ticket_types tt ON tt.id = t.ticket_type_id
+        LEFT JOIN assignment_groups ag ON ag.id = t.assignment_group_id
         WHERE tr.parent_ticket_id = ${ticketId}::uuid
           AND parent.organization_id = ${user.organizationId}::uuid
         UNION ALL
@@ -33,15 +34,19 @@ export class RelatedItemsController {
                  WHEN 'CHILD_INCIDENT' THEN 'PARENT_INCIDENT'
                  WHEN 'RELATED_CHANGE' THEN 'RELATED_INCIDENT'
                  WHEN 'RELATED_PROBLEM' THEN 'RELATED_INCIDENT'
+                 WHEN 'CAUSED_BY_CHANGE' THEN 'CAUSED_INCIDENT'
+                 WHEN 'CAUSED_INCIDENT' THEN 'CAUSED_BY_CHANGE'
+                 WHEN 'IMPLEMENTED_BY_CHANGE' THEN 'IMPLEMENTS'
                END AS "relationshipType",
                'INBOUND' AS direction, tr.created_at AS "createdAt",
                parent.id AS "ticketId", parent.ticket_number AS "ticketNumber",
-               parent.title, parent_status.name AS status, parent_type.name AS "ticketType"
+               parent.title, parent_status.name AS status, parent_type.name AS "ticketType", parent_group.name AS "assignmentGroup"
         FROM ticket_relationships tr
         JOIN tickets child ON child.id = tr.related_ticket_id
         JOIN tickets parent ON parent.id = tr.parent_ticket_id
         LEFT JOIN statuses parent_status ON parent_status.id = parent.status_id
         LEFT JOIN ticket_types parent_type ON parent_type.id = parent.ticket_type_id
+        LEFT JOIN assignment_groups parent_group ON parent_group.id = parent.assignment_group_id
         WHERE tr.related_ticket_id = ${ticketId}::uuid
           AND child.organization_id = ${user.organizationId}::uuid
       ) relationships

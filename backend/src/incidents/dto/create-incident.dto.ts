@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 const levels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 
@@ -28,4 +28,12 @@ export class CreateIncidentDto {
   @IsString()
   @MaxLength(100)
   affectedService?: string;
+
+  @IsOptional()
+  @IsUUID()
+  createdForId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  configurationItemId?: string;
 }

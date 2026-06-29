@@ -16,7 +16,7 @@ const serviceRequestInclude = {
   createdBy: { select: { id: true, name: true, email: true } },
   assignedTo: { select: { id: true, name: true, email: true } },
   assignmentGroup: { select: { id: true, name: true } },
-  serviceRequest: { include: { catalogItem: { include: { category: true, approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' as const } } } }, approvals: { include: { approver: { select: { id: true, name: true, email: true } } }, orderBy: { sequence: 'asc' as const } }, tasks: { include: { assignmentGroup: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' as const } } } },
+  serviceRequest: { include: { requestedFor: { select: { id: true, name: true, email: true } }, catalogItem: { include: { category: true, approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' as const } } } }, approvals: { include: { approver: { select: { id: true, name: true, email: true } } }, orderBy: { sequence: 'asc' as const } }, tasks: { include: { assignmentGroup: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' as const } } } },
   activities: { include: { createdBy: { select: { id: true, name: true } }, activityType: true }, orderBy: { createdAt: 'desc' as const } },
   slas: { include: { definition: { select: { id: true, name: true, version: true } } }, orderBy: { createdAt: 'desc' as const } },
 } satisfies Prisma.TicketInclude;
@@ -151,8 +151,9 @@ export class ServiceRequestsService {
   }
 
   async createRequest(user: AuthUser, dto: CreateServiceRequestDto) {
-    const [dbUser, openStatus, approvalStatus, type, priority, item] = await Promise.all([
+    const [dbUser, requestedFor, openStatus, approvalStatus, type, priority, item] = await Promise.all([
       this.prisma.user.findFirst({ where: { id: user.id, organizationId: user.organizationId } }),
+      this.prisma.user.findFirst({ where: { id: dto.requestedForId ?? user.id, organizationId: user.organizationId, active: true } }),
       this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'OPEN' } } }),
       this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'AWAITING_APPROVAL' } } }),
       this.prisma.ticketType.findUnique({ where: { name: 'SERVICE_REQUEST' } }),
@@ -160,6 +161,7 @@ export class ServiceRequestsService {
       this.prisma.serviceCatalogItem.findFirst({ where: { id: dto.catalogItemId, organizationId: user.organizationId, active: true }, include: { approvalRules: { where: { active: true }, orderBy: { sequence: 'asc' }, include: { approvalGroup: true, specificApprover: true } } } }),
     ]);
     if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
+    if (!requestedFor) throw new BadRequestException('Created for user must be active and in this organization');
     if (!openStatus || !type || !priority) throw new BadRequestException('Required lookup data is missing');
     if (!item) throw new BadRequestException('Service catalog item is not available');
     const resolvedApprovalRules = item.approvalRules.flatMap((rule) => {
@@ -201,7 +203,7 @@ export class ServiceRequestsService {
           ticketTypeId: type.id,
           priorityId: priority.id,
           assignmentGroupId: item.defaultAssignmentGroupId,
-          serviceRequest: { create: { catalogItemId: item.id, requestedForId: user.id, requestDetails: (dto.requestDetails ?? {}) as Prisma.InputJsonValue } },
+          serviceRequest: { create: { catalogItemId: item.id, requestedForId: requestedFor.id, requestDetails: (dto.requestDetails ?? {}) as Prisma.InputJsonValue } },
         },
         include: serviceRequestInclude,
       });
@@ -360,7 +362,8 @@ export class ServiceRequestsService {
         updatedAt: new Date(),
       },
     });
-    await this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: `Task ${task.taskNumber} updated${dto.status ? ` to ${dto.status}` : ''}` } });
+    const note = dto.workNote?.trim();
+    await this.prisma.ticketActivity.create({ data: { ticketId: id, createdById: user.id, comment: note ? `${task.taskNumber}: ${note}` : `Task ${task.taskNumber} updated${dto.status ? ` to ${dto.status}` : ''}` } });
     return this.prisma.ticket.findUniqueOrThrow({ where: { id }, include: serviceRequestInclude });
   }
 

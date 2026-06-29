@@ -16,7 +16,8 @@ const incidentInclude = {
   createdBy: { select: { id: true, name: true, email: true } },
   assignedTo: { select: { id: true, name: true, email: true } },
   assignmentGroup: { select: { id: true, name: true } },
-  incident: true,
+  ticketConfigurationItems: { include: { configurationItem: { include: { ciType: true } } }, orderBy: { createdAt: 'asc' as const } },
+  incident: { include: { createdFor: { select: { id: true, name: true, email: true } } } },
   activities: { include: { createdBy: { select: { id: true, name: true } }, activityType: true }, orderBy: { createdAt: 'desc' as const } },
   slas: { include: { definition: { select: { id: true, name: true, version: true } } }, orderBy: { createdAt: 'desc' as const } },
 } satisfies Prisma.TicketInclude;
@@ -26,13 +27,16 @@ export class IncidentsService {
   constructor(private readonly prisma: PrismaService, private readonly slaService: SlaService) {}
 
   async create(user: AuthUser, dto: CreateIncidentDto) {
-    const [dbUser, status, type, priority] = await Promise.all([
+    const [dbUser, createdFor, status, type, priority, configurationItem] = await Promise.all([
       this.prisma.user.findFirst({ where: { id: user.id, organizationId: user.organizationId } }),
+      this.prisma.user.findFirst({ where: { id: dto.createdForId ?? user.id, organizationId: user.organizationId, active: true } }),
       this.prisma.status.findUnique({ where: { module_name: { module: 'TICKET', name: 'OPEN' } } }),
       this.prisma.ticketType.findUnique({ where: { name: 'INCIDENT' } }),
       this.prisma.priority.findUnique({ where: { name: dto.priority } }),
+      dto.configurationItemId ? this.ensureConfigurationItem(user.organizationId, dto.configurationItemId) : Promise.resolve(null),
     ]);
     if (!dbUser) throw new BadRequestException('Authenticated user does not belong to this organization');
+    if (!createdFor) throw new BadRequestException('Created for user must be active and in this organization');
     if (!status || !type || !priority) throw new BadRequestException('Required lookup data is missing');
     const matchingSlas = await this.prisma.slaDefinition.findMany({
       where: { organizationId: user.organizationId, active: true, OR: [{ ticketTypeId: type.id }, { ticketTypeId: null }], AND: [{ OR: [{ priorityId: priority.id }, { priorityId: null }] }] },
@@ -58,22 +62,23 @@ export class IncidentsService {
           statusId: status.id,
           ticketTypeId: type.id,
           priorityId: priority.id,
-          incident: { create: { impact: dto.impact, urgency: dto.urgency, affectedService: dto.affectedService } },
+          incident: { create: { createdForId: createdFor.id, impact: dto.impact, urgency: dto.urgency, affectedService: dto.affectedService } },
         },
         include: incidentInclude,
       });
+      if (configurationItem) await tx.ticketConfigurationItem.create({ data: { ticketId: ticket.id, ciId: configurationItem.id } });
       await tx.auditLog.create({ data: { organizationId: user.organizationId, tableName: 'tickets', recordId: ticket.id, action: 'CREATE', newValue: { ticketNumber: ticket.ticketNumber, title: ticket.title }, changedById: user.id } });
       if (slaDefinition) {
         const startedAt = new Date();
         const dueDates = { responseDueAt: addSlaMinutes(startedAt, slaDefinition.responseTargetMinutes, slaDefinition.calendar), resolutionDueAt: addSlaMinutes(startedAt, slaDefinition.resolutionTargetMinutes, slaDefinition.calendar) };
         await tx.ticketSla.create({ data: { ticketId: ticket.id, slaDefinitionId: slaDefinition.id, definitionName: slaDefinition.name, definitionVersion: slaDefinition.version, responseTargetMinutes: slaDefinition.responseTargetMinutes, resolutionTargetMinutes: slaDefinition.resolutionTargetMinutes, startedAt, ...dueDates, events: { create: { eventType: 'STARTED', details: { calendar: slaDefinition.calendar.name, calendarType: slaDefinition.calendar.calendarType } } } } });
       }
-      return tx.ticket.findUniqueOrThrow({ where: { id: ticket.id }, include: incidentInclude });
+      return this.withConfigurationItem(await tx.ticket.findUniqueOrThrow({ where: { id: ticket.id }, include: incidentInclude }));
     });
   }
 
-  findAll(user: AuthUser) {
-    return this.prisma.ticket.findMany({
+  async findAll(user: AuthUser) {
+    const values = await this.prisma.ticket.findMany({
       where: {
         organizationId: user.organizationId,
         ticketType: { name: 'INCIDENT' },
@@ -82,6 +87,7 @@ export class IncidentsService {
       include: incidentInclude,
       orderBy: { createdAt: 'desc' },
     });
+    return values.map((ticket) => this.withConfigurationItem(ticket));
   }
 
   async findOne(user: AuthUser, id: string) {
@@ -95,7 +101,7 @@ export class IncidentsService {
       include: incidentInclude,
     });
     if (!ticket) throw new NotFoundException('Incident not found');
-    return ticket;
+    return this.withConfigurationItem(ticket);
   }
 
   async assign(user: AuthUser, id: string, dto: AssignIncidentDto) {
@@ -121,6 +127,7 @@ export class IncidentsService {
       ? await this.prisma.priority.findUnique({ where: { name: dto.priority } })
       : null;
     if (dto.priority && !priority) throw new BadRequestException('Unknown priority');
+    const configurationItem = dto.configurationItemId ? await this.ensureConfigurationItem(ticket.organizationId, dto.configurationItemId) : null;
 
     return this.prisma.$transaction(async (tx) => {
       await tx.incident.update({
@@ -132,6 +139,10 @@ export class IncidentsService {
         data: { title: dto.title, description: dto.description, priorityId: priority?.id, updatedAt: new Date() },
         include: incidentInclude,
       });
+      if (dto.configurationItemId !== undefined) {
+        await tx.ticketConfigurationItem.deleteMany({ where: { ticketId: id } });
+        if (configurationItem) await tx.ticketConfigurationItem.create({ data: { ticketId: id, ciId: configurationItem.id } });
+      }
       await tx.auditLog.create({
         data: {
           organizationId: ticket.organizationId,
@@ -150,7 +161,7 @@ export class IncidentsService {
           changedById: user.id,
         },
       });
-      return updated;
+      return this.withConfigurationItem(updated);
     });
   }
 
@@ -209,5 +220,16 @@ export class IncidentsService {
       }
       return updated;
     });
+  }
+
+  private async ensureConfigurationItem(organizationId: string, id: string) {
+    const item = await this.prisma.configurationItem.findFirst({ where: { id, organizationId } });
+    if (!item) throw new BadRequestException('Configuration item does not belong to this organization');
+    return item;
+  }
+
+  private withConfigurationItem<T extends { ticketConfigurationItems?: { configurationItem: { id: string; name: string; ciType?: { name: string } | null } }[] }>(ticket: T) {
+    const item = ticket.ticketConfigurationItems?.[0]?.configurationItem;
+    return { ...ticket, configurationItem: item ? { id: item.id, name: item.name, ciType: item.ciType?.name } : undefined };
   }
 }

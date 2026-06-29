@@ -1,0 +1,5 @@
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS impact varchar(20) DEFAULT 'MEDIUM';
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS risk varchar(20) DEFAULT 'MEDIUM';
+
+UPDATE problems SET impact = 'MEDIUM' WHERE impact IS NULL;
+UPDATE problems SET risk = 'MEDIUM' WHERE risk IS NULL;

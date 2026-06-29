@@ -96,3 +96,57 @@ export class TestStorageConnectionDto {
   @IsOptional() @IsString() region?: string;
   @IsOptional() @IsString() endpoint?: string;
 }
+
+export class CreateChangeApprovalRuleDto {
+  @IsInt() @Min(1) sequence!: number;
+  @IsIn(['MANAGER', 'GROUP', 'SPECIFIC_USER', 'CAB', 'SECURITY', 'ITAM']) approvalType!: string;
+  @IsOptional() @IsUUID() approvalGroupId?: string;
+  @IsOptional() @IsUUID() specificApproverId?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class UpdateChangeApprovalRuleDto {
+  @IsOptional() @IsInt() @Min(1) sequence?: number;
+  @IsOptional() @IsIn(['MANAGER', 'GROUP', 'SPECIFIC_USER', 'CAB', 'SECURITY', 'ITAM']) approvalType?: string;
+  @IsOptional() @IsUUID() approvalGroupId?: string;
+  @IsOptional() @IsUUID() specificApproverId?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class CreateCiCategoryDto {
+  @IsString() @MinLength(2) @MaxLength(80) name!: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class UpdateCiCategoryDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(80) name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class CreateCiTypeDto {
+  @IsUUID() categoryId!: string;
+  @IsString() @MinLength(2) @MaxLength(50) name!: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class UpdateCiTypeDto {
+  @IsOptional() @IsUUID() categoryId?: string;
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(50) name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class CreateCiRelationshipTypeDto {
+  @IsString() @MinLength(2) @MaxLength(80) name!: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class UpdateCiRelationshipTypeDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(80) name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS changes (
   planned_start timestamptz,
   planned_end timestamptz,
   implementation_plan text,
-  backout_plan text,
+  rollback_plan text,
   test_plan text,
   actual_start timestamptz,
   actual_end timestamptz,
@@ -26,7 +26,7 @@ ALTER TABLE changes ADD COLUMN IF NOT EXISTS impact varchar(20) NOT NULL DEFAULT
 ALTER TABLE changes ADD COLUMN IF NOT EXISTS planned_start timestamptz;
 ALTER TABLE changes ADD COLUMN IF NOT EXISTS planned_end timestamptz;
 ALTER TABLE changes ADD COLUMN IF NOT EXISTS implementation_plan text;
-ALTER TABLE changes ADD COLUMN IF NOT EXISTS backout_plan text;
+ALTER TABLE changes ADD COLUMN IF NOT EXISTS rollback_plan text;
 ALTER TABLE changes ADD COLUMN IF NOT EXISTS test_plan text;
 ALTER TABLE changes ADD COLUMN IF NOT EXISTS actual_start timestamptz;
 ALTER TABLE changes ADD COLUMN IF NOT EXISTS actual_end timestamptz;

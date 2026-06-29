@@ -81,6 +81,10 @@ export class CreateServiceRequestDto {
   @IsUUID()
   catalogItemId!: string;
 
+  @IsOptional()
+  @IsUUID()
+  requestedForId?: string;
+
   @IsString()
   @MinLength(3)
   @MaxLength(200)
@@ -169,4 +173,8 @@ export class UpdateRequestTaskDto {
   @IsOptional()
   @IsIn(['OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'])
   status?: string;
+
+  @IsOptional()
+  @IsString()
+  workNote?: string;
 }

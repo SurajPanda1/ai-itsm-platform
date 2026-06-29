@@ -6,7 +6,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminGuard } from './admin.guard';
-import { CreateBusinessCalendarDto, CreateDepartmentDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, TestStorageConnectionDto, UpdateDepartmentDto, UpdateGroupDto, UpdateOrganizationSettingsDto, UpdateUserDto } from './admin.dto';
+import { CreateBusinessCalendarDto, CreateChangeApprovalRuleDto, CreateCiCategoryDto, CreateCiRelationshipTypeDto, CreateCiTypeDto, CreateDepartmentDto, CreateGroupDto, CreateSlaDefinitionDto, CreateUserDto, GroupMemberDto, GroupRoleDto, TestStorageConnectionDto, UpdateChangeApprovalRuleDto, UpdateCiCategoryDto, UpdateCiRelationshipTypeDto, UpdateCiTypeDto, UpdateDepartmentDto, UpdateGroupDto, UpdateOrganizationSettingsDto, UpdateUserDto } from './admin.dto';
 import { Roles } from '../auth/roles';
 import { Prisma } from '@prisma/client';
 import { AttachmentConnectionService } from '../attachments/attachment-connection.service';
@@ -74,6 +74,74 @@ export class AdminController {
       this.prisma.businessCalendar.findMany({ where: { organizationId: user.organizationId, active: true }, select: { id: true, name: true, timezone: true, calendarType: true } }),
     ]);
     return { roles, departments, priorities, ticketTypes, calendars };
+  }
+
+  @Get('cmdb-settings')
+  async cmdbSettings(@CurrentUser() user: AuthUser) {
+    const [categories, types, relationshipTypes] = await Promise.all([
+      this.prisma.ciCategory.findMany({ where: { organizationId: user.organizationId }, orderBy: [{ active: 'desc' }, { name: 'asc' }] }),
+      this.prisma.ciType.findMany({ where: { organizationId: user.organizationId }, include: { category: { select: { id: true, name: true, active: true } } }, orderBy: [{ active: 'desc' }, { name: 'asc' }] }),
+      this.prisma.ciRelationshipType.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }] }),
+    ]);
+    return { categories, types, relationshipTypes };
+  }
+
+  @Post('cmdb-settings/categories')
+  async createCiCategory(@CurrentUser() user: AuthUser, @Body() dto: CreateCiCategoryDto) {
+    try {
+      return await this.prisma.ciCategory.create({ data: { organizationId: user.organizationId, name: dto.name, description: dto.description, active: dto.active ?? true } });
+    } catch (error) {
+      this.handleDuplicateLookup(error, 'CI category already exists');
+    }
+  }
+
+  @Patch('cmdb-settings/categories/:id')
+  async updateCiCategory(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCiCategoryDto) {
+    try {
+      const updated = await this.prisma.ciCategory.updateMany({ where: { id, organizationId: user.organizationId }, data: { ...dto } });
+      return { updated: updated.count > 0 };
+    } catch (error) {
+      this.handleDuplicateLookup(error, 'CI category already exists');
+    }
+  }
+
+  @Post('cmdb-settings/types')
+  async createCiType(@CurrentUser() user: AuthUser, @Body() dto: CreateCiTypeDto) {
+    await this.ensureCiCategory(user.organizationId, dto.categoryId);
+    try {
+      return await this.prisma.ciType.create({ data: { organizationId: user.organizationId, categoryId: dto.categoryId, name: dto.name, description: dto.description, active: dto.active ?? true } });
+    } catch (error) {
+      this.handleDuplicateLookup(error, 'CI type already exists');
+    }
+  }
+
+  @Patch('cmdb-settings/types/:id')
+  async updateCiType(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCiTypeDto) {
+    if (dto.categoryId) await this.ensureCiCategory(user.organizationId, dto.categoryId);
+    try {
+      const updated = await this.prisma.ciType.updateMany({ where: { id, organizationId: user.organizationId }, data: { categoryId: dto.categoryId, name: dto.name, description: dto.description, active: dto.active, updatedAt: new Date() } });
+      return { updated: updated.count > 0 };
+    } catch (error) {
+      this.handleDuplicateLookup(error, 'CI type already exists');
+    }
+  }
+
+  @Post('cmdb-settings/relationship-types')
+  async createCiRelationshipType(@Body() dto: CreateCiRelationshipTypeDto) {
+    try {
+      return await this.prisma.ciRelationshipType.create({ data: { name: dto.name, description: dto.description, active: dto.active ?? true } });
+    } catch (error) {
+      this.handleDuplicateLookup(error, 'Relationship type already exists');
+    }
+  }
+
+  @Patch('cmdb-settings/relationship-types/:id')
+  async updateCiRelationshipType(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCiRelationshipTypeDto) {
+    try {
+      return await this.prisma.ciRelationshipType.update({ where: { id }, data: { name: dto.name, description: dto.description, active: dto.active, updatedAt: new Date() } });
+    } catch (error) {
+      this.handleDuplicateLookup(error, 'Relationship type already exists');
+    }
   }
 
   @Post('departments')
@@ -220,5 +288,85 @@ export class AdminController {
   @Patch('slas/:id/deactivate')
   deactivateSla(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.prisma.slaDefinition.updateMany({ where: { id, organizationId: user.organizationId }, data: { active: false, updatedAt: new Date() } });
+  }
+
+  @Get('change-approval-rules')
+  changeApprovalRules(@CurrentUser() user: AuthUser) {
+    return this.prisma.changeApprovalRule.findMany({
+      where: { organizationId: user.organizationId },
+      include: {
+        approvalGroup: { select: { id: true, name: true } },
+        specificApprover: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: [{ active: 'desc' }, { sequence: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  @Post('change-approval-rules')
+  async createChangeApprovalRule(@CurrentUser() user: AuthUser, @Body() dto: CreateChangeApprovalRuleDto) {
+    await this.validateChangeApprovalRule(user.organizationId, dto.approvalType, dto.approvalGroupId, dto.specificApproverId);
+    return this.prisma.changeApprovalRule.create({
+      data: {
+        organizationId: user.organizationId,
+        sequence: dto.sequence,
+        approvalType: dto.approvalType,
+        approvalGroupId: this.isGroupBackedChangeApproval(dto.approvalType) ? dto.approvalGroupId : null,
+        specificApproverId: dto.approvalType === 'SPECIFIC_USER' ? dto.specificApproverId : null,
+        active: dto.active ?? true,
+      },
+      include: { approvalGroup: { select: { id: true, name: true } }, specificApprover: { select: { id: true, name: true, email: true } } },
+    });
+  }
+
+  @Patch('change-approval-rules/:id')
+  async updateChangeApprovalRule(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateChangeApprovalRuleDto) {
+    const current = await this.prisma.changeApprovalRule.findFirst({ where: { id, organizationId: user.organizationId } });
+    if (!current) throw new BadRequestException('Change approval rule not found');
+    const approvalType = dto.approvalType ?? current.approvalType;
+    await this.validateChangeApprovalRule(user.organizationId, approvalType, dto.approvalGroupId ?? current.approvalGroupId ?? undefined, dto.specificApproverId ?? current.specificApproverId ?? undefined);
+    return this.prisma.changeApprovalRule.update({
+      where: { id },
+      data: {
+        sequence: dto.sequence,
+        approvalType: dto.approvalType,
+        approvalGroupId: this.isGroupBackedChangeApproval(approvalType) ? (dto.approvalGroupId ?? current.approvalGroupId) : null,
+        specificApproverId: approvalType === 'SPECIFIC_USER' ? (dto.specificApproverId ?? current.specificApproverId) : null,
+        active: dto.active,
+        updatedAt: new Date(),
+      },
+      include: { approvalGroup: { select: { id: true, name: true } }, specificApprover: { select: { id: true, name: true, email: true } } },
+    });
+  }
+
+  @Patch('change-approval-rules/:id/deactivate')
+  deactivateChangeApprovalRule(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.prisma.changeApprovalRule.updateMany({ where: { id, organizationId: user.organizationId }, data: { active: false, updatedAt: new Date() } });
+  }
+
+  private async validateChangeApprovalRule(organizationId: string, approvalType: string, approvalGroupId?: string, specificApproverId?: string) {
+    if (this.isGroupBackedChangeApproval(approvalType)) {
+      if (!approvalGroupId) throw new BadRequestException('Approval group is required for group approval');
+      const group = await this.prisma.assignmentGroup.findFirst({ where: { id: approvalGroupId, organizationId, active: true } });
+      if (!group) throw new BadRequestException('Approval group must be active and belong to this organization');
+    }
+    if (approvalType === 'SPECIFIC_USER') {
+      if (!specificApproverId) throw new BadRequestException('Specific approver is required');
+      const approver = await this.prisma.user.findFirst({ where: { id: specificApproverId, organizationId, active: true } });
+      if (!approver) throw new BadRequestException('Specific approver must be active and belong to this organization');
+    }
+  }
+
+  private isGroupBackedChangeApproval(approvalType: string) {
+    return ['GROUP', 'CAB', 'SECURITY', 'ITAM'].includes(approvalType);
+  }
+
+  private async ensureCiCategory(organizationId: string, categoryId: string) {
+    const exists = await this.prisma.ciCategory.count({ where: { id: categoryId, organizationId, active: true } });
+    if (!exists) throw new BadRequestException('CI category must be active and belong to this organization');
+  }
+
+  private handleDuplicateLookup(error: unknown, message: string): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new BadRequestException(message);
+    throw error;
   }
 }

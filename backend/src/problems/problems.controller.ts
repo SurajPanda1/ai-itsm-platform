@@ -2,8 +2,8 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } f
 import { AuthUser } from '../auth/auth-user';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { AddCommentDto, AssignIncidentDto, ChangeStatusDto } from '../incidents/dto/incident-actions.dto';
-import { CreateProblemDto, CreateProblemTaskDto, UpdateProblemDto, UpdateProblemTaskDto } from './dto/problem.dto';
+import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
+import { ChangeProblemStatusDto, CreateProblemDto, CreateProblemTaskDto, UpdateProblemDto, UpdateProblemTaskDto } from './dto/problem.dto';
 import { ProblemsService } from './problems.service';
 
 @Controller('problems')
@@ -27,7 +27,7 @@ export class ProblemsController {
   assign(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AssignIncidentDto) { return this.problems.assign(user, id, dto); }
 
   @Patch(':id/status')
-  changeStatus(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeStatusDto) { return this.problems.changeStatus(user, id, dto); }
+  changeStatus(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeProblemStatusDto) { return this.problems.changeStatus(user, id, dto); }
 
   @Post(':id/comments')
   comment(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AddCommentDto) { return this.problems.addComment(user, id, dto); }
