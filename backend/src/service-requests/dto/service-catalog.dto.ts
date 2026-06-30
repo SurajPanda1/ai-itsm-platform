@@ -99,6 +99,18 @@ export class CreateServiceRequestDto {
   requestDetails?: Record<string, unknown>;
 }
 
+export class UpdateServiceRequestDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(200)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
 export class CreateApprovalRuleDto {
   @IsUUID()
   catalogItemId!: string;

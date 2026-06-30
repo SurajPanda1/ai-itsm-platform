@@ -17,9 +17,11 @@ import { ProblemsModule } from './problems/problems.module';
 import { ChangesModule } from './changes/changes.module';
 import { UsersModule } from './users/users.module';
 import { ConfigurationItemsModule } from './configuration-items/configuration-items.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
+import { ServicePortalModule } from './service-portal/service-portal.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AnalyticsModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, UsersModule, ConfigurationItemsModule, ServiceRequestsModule, ProblemsModule, ChangesModule, IncidentsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), PrismaModule, AuthModule, SlaModule, AdminModule, AnalyticsModule, AttachmentsModule, AssignmentGroupsModule, RelatedItemsModule, UsersModule, ConfigurationItemsModule, KnowledgeModule, ServicePortalModule, ServiceRequestsModule, ProblemsModule, ChangesModule, IncidentsModule],
   controllers: [AppController],
   providers: [AppService],
 })

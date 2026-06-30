@@ -1,0 +1,5 @@
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS impact_details TEXT;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS risk_accepted BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS risk_owner_id UUID REFERENCES users(id);
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS risk_accepted_until TIMESTAMPTZ;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS risk_acceptance_summary TEXT;

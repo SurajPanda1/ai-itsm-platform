@@ -28,6 +28,9 @@ model Organization {
   ciTypes                  CiType[]
   ciRelationships          CiRelationship[]
   changeApprovalRules      ChangeApprovalRule[]
+  knowledgeArticles        KnowledgeArticle[]
+  ticketKnowledgeArticles  TicketKnowledgeArticle[]
+  servicePortalSettings    ServicePortalSettings?
 
   @@map("organizations")
 }
@@ -84,6 +87,9 @@ model User {
   requestedChanges            Change[]                @relation("ChangeRequester")
   ownedConfigurationItems     ConfigurationItem[]     @relation("ConfigurationItemOwner")
   createdCiRelationships      CiRelationship[]
+  authoredKnowledgeArticles   KnowledgeArticle[]        @relation("KnowledgeArticleAuthor")
+  updatedKnowledgeArticles    KnowledgeArticle[]        @relation("KnowledgeArticleUpdater")
+  linkedKnowledgeArticles     TicketKnowledgeArticle[]  @relation("TicketKnowledgeLinkedBy")
 
   @@map("users")
 }
@@ -171,6 +177,7 @@ model Ticket {
   slas                     TicketSla[]
   attachments              TicketAttachment[]
   ticketConfigurationItems TicketConfigurationItem[]
+  knowledgeArticles        TicketKnowledgeArticle[]
 
   @@index([organizationId])
   @@index([assignedToId])
@@ -312,6 +319,76 @@ model TicketAttachment {
   @@map("ticket_attachments")
 }
 
+model KnowledgeArticle {
+  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String                   @map("organization_id") @db.Uuid
+  articleNumber  String                   @unique @map("article_number") @db.VarChar(20)
+  title          String                   @db.VarChar(200)
+  category       String                   @db.VarChar(80)
+  status         String                   @default("DRAFT") @db.VarChar(30)
+  visibility     String                   @default("EMPLOYEES") @db.VarChar(30)
+  summary        String?
+  content        String?
+  keywords       String?
+  createdById    String                   @map("created_by") @db.Uuid
+  updatedById    String?                  @map("updated_by") @db.Uuid
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @default(now()) @map("updated_at")
+  publishedAt    DateTime?                @map("published_at")
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User                     @relation("KnowledgeArticleAuthor", fields: [createdById], references: [id])
+  updatedBy      User?                    @relation("KnowledgeArticleUpdater", fields: [updatedById], references: [id])
+  ticketLinks    TicketKnowledgeArticle[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, category])
+  @@map("knowledge_articles")
+}
+
+model ServicePortalSettings {
+  organizationId           String       @id @map("organization_id") @db.Uuid
+  portalEnabled            Boolean      @default(true) @map("portal_enabled")
+  portalName               String       @default("Service Portal") @map("portal_name") @db.VarChar(120)
+  welcomeMessage           String       @default("How can we help today?") @map("welcome_message")
+  defaultLandingPage       String       @default("HOME") @map("default_landing_page") @db.VarChar(40)
+  knowledgeEnabled         Boolean      @default(true) @map("knowledge_enabled")
+  allowKbSearch            Boolean      @default(true) @map("allow_kb_search")
+  allowKbRatings           Boolean      @default(false) @map("allow_kb_ratings")
+  bannerEnabled            Boolean      @default(false) @map("banner_enabled")
+  bannerMessage            String?      @map("banner_message")
+  bannerBackgroundColor    String       @default("#dc2626") @map("banner_background_color") @db.VarChar(20)
+  bannerTextColor          String       @default("#ffffff") @map("banner_text_color") @db.VarChar(20)
+  bannerPriority           String       @default("INFORMATION") @map("banner_priority") @db.VarChar(20)
+  allowIncidentCreation    Boolean      @default(true) @map("allow_incident_creation")
+  allowServiceRequests     Boolean      @default(true) @map("allow_service_requests")
+  allowEmployeeCloseTicket Boolean      @default(false) @map("allow_employee_close_ticket")
+  showRecentTickets        Boolean      @default(true) @map("show_recent_tickets")
+  showMyRequests           Boolean      @default(true) @map("show_my_requests")
+  createdAt                DateTime     @default(now()) @map("created_at")
+  updatedAt                DateTime     @default(now()) @map("updated_at")
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("service_portal_settings")
+}
+
+model TicketKnowledgeArticle {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String           @map("organization_id") @db.Uuid
+  ticketId           String           @map("ticket_id") @db.Uuid
+  knowledgeArticleId String           @map("knowledge_article_id") @db.Uuid
+  linkedById         String           @map("linked_by") @db.Uuid
+  linkedAt           DateTime         @default(now()) @map("linked_at")
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticket             Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  knowledgeArticle   KnowledgeArticle @relation(fields: [knowledgeArticleId], references: [id], onDelete: Cascade)
+  linkedBy           User             @relation("TicketKnowledgeLinkedBy", fields: [linkedById], references: [id])
+
+  @@unique([ticketId, knowledgeArticleId])
+  @@index([organizationId, ticketId])
+  @@index([knowledgeArticleId])
+  @@map("ticket_knowledge_articles")
+}
+
 model AssignmentGroup {
   id                  String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId      String                  @map("organization_id") @db.Uuid
@@ -398,7 +475,12 @@ model Problem {
   workaround   String?
   permanentFix String?       @map("permanent_fix")
   impact       String?       @default("MEDIUM") @db.VarChar(20)
+  impactDetails String?      @map("impact_details")
   risk         String?       @default("MEDIUM") @db.VarChar(20)
+  riskAccepted Boolean       @default(false) @map("risk_accepted")
+  riskOwnerId  String?       @map("risk_owner_id") @db.Uuid
+  riskAcceptedUntil DateTime? @map("risk_accepted_until")
+  riskAcceptanceSummary String? @map("risk_acceptance_summary")
   knownError   Boolean       @default(false) @map("known_error")
   resolvedAt   DateTime?     @map("resolved_at")
   createdAt    DateTime      @default(now()) @map("created_at")

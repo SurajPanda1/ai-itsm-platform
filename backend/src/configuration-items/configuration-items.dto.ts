@@ -1,7 +1,6 @@
 import { IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class CreateConfigurationItemDto {
-  @IsOptional() @IsString() @MaxLength(30) ciNumber?: string;
   @IsString() @MinLength(2) @MaxLength(100) name!: string;
   @IsUUID() categoryId!: string;
   @IsUUID() typeId!: string;
@@ -13,7 +12,6 @@ export class CreateConfigurationItemDto {
 }
 
 export class UpdateConfigurationItemDto {
-  @IsOptional() @IsString() @MaxLength(30) ciNumber?: string;
   @IsOptional() @IsString() @MinLength(2) @MaxLength(100) name?: string;
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() typeId?: string;

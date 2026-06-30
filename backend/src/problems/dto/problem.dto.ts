@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 const priorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 const riskLevels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
@@ -10,11 +10,16 @@ export class CreateProblemDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsIn(priorities) priority: (typeof priorities)[number] = 'MEDIUM';
   @IsOptional() @IsIn(riskLevels) impact: (typeof riskLevels)[number] = 'MEDIUM';
+  @IsOptional() @IsString() impactDetails?: string;
   @IsOptional() @IsIn(riskLevels) risk: (typeof riskLevels)[number] = 'MEDIUM';
   @IsOptional() @IsString() rootCause?: string;
   @IsOptional() @IsString() workaround?: string;
   @IsOptional() @IsString() permanentFix?: string;
   @IsOptional() @IsBoolean() knownError?: boolean;
+  @IsOptional() @IsBoolean() riskAccepted?: boolean;
+  @IsOptional() @IsUUID() riskOwnerId?: string;
+  @IsOptional() @IsDateString() riskAcceptedUntil?: string;
+  @IsOptional() @IsString() riskAcceptanceSummary?: string;
   @IsOptional() @IsUUID() configurationItemId?: string;
 }
 
@@ -23,11 +28,16 @@ export class UpdateProblemDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsIn(priorities) priority?: (typeof priorities)[number];
   @IsOptional() @IsIn(riskLevels) impact?: (typeof riskLevels)[number];
+  @IsOptional() @IsString() impactDetails?: string;
   @IsOptional() @IsIn(riskLevels) risk?: (typeof riskLevels)[number];
   @IsOptional() @IsString() rootCause?: string;
   @IsOptional() @IsString() workaround?: string;
   @IsOptional() @IsString() permanentFix?: string;
   @IsOptional() @IsBoolean() knownError?: boolean;
+  @IsOptional() @IsBoolean() riskAccepted?: boolean;
+  @IsOptional() @IsUUID() riskOwnerId?: string;
+  @IsOptional() @IsDateString() riskAcceptedUntil?: string;
+  @IsOptional() @IsString() riskAcceptanceSummary?: string;
   @IsOptional() @IsUUID() configurationItemId?: string;
 }
 

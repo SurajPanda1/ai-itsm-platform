@@ -122,7 +122,7 @@ export class ConfigurationItemsController {
       const item = await this.prisma.configurationItem.create({
         data: {
           organizationId: user.organizationId,
-          ciNumber: dto.ciNumber || await this.nextCiNumber(user.organizationId),
+          ciNumber: await this.nextCiNumber(user.organizationId),
           name: dto.name,
           description: dto.description,
           ownerId: dto.ownerId,
@@ -150,7 +150,6 @@ export class ConfigurationItemsController {
       const item = await this.prisma.configurationItem.update({
         where: { id },
         data: {
-          ciNumber: dto.ciNumber,
           name: dto.name,
           description: dto.description,
           ownerId: dto.ownerId,

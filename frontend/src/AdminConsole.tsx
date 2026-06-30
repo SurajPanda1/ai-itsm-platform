@@ -10,6 +10,7 @@ import type {
   ServiceCatalogCategory,
   ServiceCatalogItem,
   ServiceApprovalRule,
+  ServicePortalSettings,
   SlaDefinition,
   CmdbCategory,
   CmdbRelationshipTypeLookup,
@@ -44,6 +45,25 @@ const defaultSettings: OrganizationSettings = {
     endpoint: "",
     maxFileSizeMb: 10,
   },
+};
+const defaultPortalSettings: ServicePortalSettings = {
+  portalEnabled: true,
+  portalName: "Service Portal",
+  welcomeMessage: "How can we help today?",
+  defaultLandingPage: "HOME",
+  knowledgeEnabled: true,
+  allowKbSearch: true,
+  allowKbRatings: false,
+  bannerEnabled: false,
+  bannerMessage: "",
+  bannerBackgroundColor: "#dc2626",
+  bannerTextColor: "#ffffff",
+  bannerPriority: "INFORMATION",
+  allowIncidentCreation: true,
+  allowServiceRequests: true,
+  allowEmployeeCloseTicket: false,
+  showRecentTickets: true,
+  showMyRequests: true,
 };
 const changeGroupApprovalTypes = ["GROUP", "CAB", "SECURITY", "ITAM"];
 
@@ -176,7 +196,7 @@ export default function AdminConsole({
   token: string;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"users" | "groups" | "catalog" | "change-approvals" | "cmdb-settings" | "slas" | "settings">(
+  const [tab, setTab] = useState<"users" | "groups" | "catalog" | "change-approvals" | "cmdb-settings" | "slas" | "service-portal" | "settings">(
     "users",
   );
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -186,6 +206,7 @@ export default function AdminConsole({
   const [changeApprovalRules, setChangeApprovalRules] = useState<ChangeApprovalRule[]>([]);
   const [cmdbSettings, setCmdbSettings] = useState<AdminCmdbSettings>({ categories: [], types: [], relationshipTypes: [] });
   const [settings, setSettings] = useState(defaultSettings);
+  const [portalSettings, setPortalSettings] = useState<ServicePortalSettings>(defaultPortalSettings);
   const [reference, setReference] = useState(emptyReference);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -205,6 +226,10 @@ export default function AdminConsole({
   const [catalogPanel, setCatalogPanel] = useState<"add-category" | "add-item" | "add-approval" | "approval-list" | "edit-approval" | "catalog-list" | "category-items" | "edit-category" | "edit-item">("catalog-list");
   const [changeApprovalPanel, setChangeApprovalPanel] = useState<"add-rule" | "rule-list" | "edit-rule">("rule-list");
   const [cmdbPanel, setCmdbPanel] = useState<"categories" | "types" | "relationship-types">("categories");
+  const [showCmdbAdd, setShowCmdbAdd] = useState(false);
+  const [cmdbCategoryFilter, setCmdbCategoryFilter] = useState("");
+  const [cmdbTypeFilter, setCmdbTypeFilter] = useState("");
+  const [cmdbRelationshipTypeFilter, setCmdbRelationshipTypeFilter] = useState("");
   const [slaPanel, setSlaPanel] = useState<"add-sla" | "add-calendar" | "sla-list" | "edit-sla">("sla-list");
   const [settingsPanel, setSettingsPanel] = useState<"branding" | "storage">("branding");
   const [editingGroup, setEditingGroup] = useState<AdminGroup | null>(null);
@@ -270,11 +295,14 @@ export default function AdminConsole({
     resolutionTargetMinutes: 480,
     pauseStatuses: ["AWAITING_CUSTOMER"],
   });
+  const filteredCiCategories = cmdbSettings.categories.filter((category) => category.name.toLowerCase().includes(cmdbCategoryFilter.trim().toLowerCase()));
+  const filteredCiTypes = cmdbSettings.types.filter((type) => type.name.toLowerCase().includes(cmdbTypeFilter.trim().toLowerCase()));
+  const filteredCiRelationshipTypes = cmdbSettings.relationshipTypes.filter((type) => type.name.toLowerCase().includes(cmdbRelationshipTypeFilter.trim().toLowerCase()));
   const [calendarName, setCalendarName] = useState("Standard Business Hours");
   const [calendarTimezone, setCalendarTimezone] = useState("Asia/Kolkata");
   async function load() {
     try {
-      const [u, g, r, s, o, c, car, cmdb] = await Promise.all([
+      const [u, g, r, s, o, c, car, cmdb, portal] = await Promise.all([
         api.adminUsers(token, page, search),
         api.adminGroups(token, groupPage, groupSearch, groupActive),
         api.adminReferenceData(token),
@@ -283,6 +311,7 @@ export default function AdminConsole({
         api.serviceCatalog(token),
         api.adminChangeApprovalRules(token),
         api.adminCmdbSettings(token),
+        api.servicePortalSettings(token),
       ]);
       setUsers(u.data);
       setTotal(u.total);
@@ -295,6 +324,7 @@ export default function AdminConsole({
       setCatalog(c);
       setChangeApprovalRules(car);
       setCmdbSettings(cmdb);
+      setPortalSettings({ ...defaultPortalSettings, ...portal });
       setSettings({
         organizationName: o.organizationName,
         branding: { ...defaultSettings.branding, ...o.branding },
@@ -728,7 +758,7 @@ export default function AdminConsole({
   async function createCiCategory(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(""); setSaved("");
-    try { await api.createCiCategory(token, newCiCategory); setNewCiCategory({ name: "", description: "" }); setSaved("CI category saved."); await load(); }
+    try { await api.createCiCategory(token, newCiCategory); setNewCiCategory({ name: "", description: "" }); setShowCmdbAdd(false); setSaved("CI category saved."); await load(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save CI category"); }
     finally { setBusy(false); }
   }
@@ -741,7 +771,7 @@ export default function AdminConsole({
   async function createCiType(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(""); setSaved("");
-    try { await api.createCiType(token, newCiType); setNewCiType({ categoryId: newCiType.categoryId, name: "", description: "" }); setSaved("CI type saved."); await load(); }
+    try { await api.createCiType(token, newCiType); setNewCiType({ categoryId: newCiType.categoryId, name: "", description: "" }); setShowCmdbAdd(false); setSaved("CI type saved."); await load(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save CI type"); }
     finally { setBusy(false); }
   }
@@ -754,7 +784,7 @@ export default function AdminConsole({
   async function createCiRelationshipType(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(""); setSaved("");
-    try { await api.createCiRelationshipType(token, newCiRelationshipType); setNewCiRelationshipType({ name: "", description: "" }); setSaved("Relationship type saved."); await load(); }
+    try { await api.createCiRelationshipType(token, newCiRelationshipType); setNewCiRelationshipType({ name: "", description: "" }); setShowCmdbAdd(false); setSaved("Relationship type saved."); await load(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save relationship type"); }
     finally { setBusy(false); }
   }
@@ -836,6 +866,24 @@ export default function AdminConsole({
       setBusy(false);
     }
   }
+  async function savePortalSettings(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setSaved("");
+    try {
+      if (portalSettings.bannerEnabled && !portalSettings.bannerMessage.trim()) {
+        throw new Error("Banner message is mandatory when banner is enabled.");
+      }
+      const savedPortal = await api.updateServicePortalSettings(token, portalSettings);
+      setPortalSettings({ ...defaultPortalSettings, ...savedPortal });
+      setSaved("Service Portal settings saved.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save Service Portal settings");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function uploadBrandAsset(kind: 'logo'|'favicon', file?: File) {
     if(!file)return;setBusy(true);setError('');setSaved('');
     try { const asset=await api.uploadBrandAsset(token,kind,file);setSettings(current=>({...current,branding:{...current.branding,[`${kind}Url`]:asset.url}}));setSaved(`${kind==='logo'?'Logo':'Favicon'} uploaded. Refresh the application to apply it everywhere.`); }
@@ -903,6 +951,12 @@ export default function AdminConsole({
             onClick={() => setTab("slas")}
           >
             SLA Policies
+          </button>
+          <button
+            className={tab === "service-portal" ? "active" : ""}
+            onClick={() => setTab("service-portal")}
+          >
+            Service Portal
           </button>
           <button
             className={tab === "settings" ? "active" : ""}
@@ -1706,43 +1760,44 @@ export default function AdminConsole({
           <div className="admin-grid">
             <div className="admin-form-stack">
               <div className="admin-form admin-card-menu">
-                <button type="button" className={cmdbPanel === "categories" ? "secondary active" : "secondary"} onClick={() => setCmdbPanel("categories")}>CI Categories</button>
-                <button type="button" className={cmdbPanel === "types" ? "secondary active" : "secondary"} onClick={() => setCmdbPanel("types")}>CI Types</button>
-                <button type="button" className={cmdbPanel === "relationship-types" ? "secondary active" : "secondary"} onClick={() => setCmdbPanel("relationship-types")}>Relationship Types</button>
+                <button type="button" className={cmdbPanel === "categories" ? "secondary active" : "secondary"} onClick={() => { setCmdbPanel("categories"); setShowCmdbAdd(false); }}>CI Categories</button>
+                <button type="button" className={cmdbPanel === "types" ? "secondary active" : "secondary"} onClick={() => { setCmdbPanel("types"); setShowCmdbAdd(false); }}>CI Types</button>
+                <button type="button" className={cmdbPanel === "relationship-types" ? "secondary active" : "secondary"} onClick={() => { setCmdbPanel("relationship-types"); setShowCmdbAdd(false); }}>Relationship Types</button>
               </div>
-              {cmdbPanel === "categories" && <form className="admin-form" onSubmit={createCiCategory}>
-                <h2>Add CI Category</h2>
+            </div>
+            <div className="admin-list cmdb-settings-workspace">
+              <div className="table-head inline-head">
+                <div>
+                  <h2>{cmdbPanel === "categories" ? "CI Categories" : cmdbPanel === "types" ? "CI Types" : "Relationship Types"}</h2>
+                  <p>{cmdbPanel === "categories" ? "High-level CMDB grouping." : cmdbPanel === "types" ? "Category-filtered CI lookup values." : "Allowed CI dependency labels."}</p>
+                </div>
+                <div className="queue-filters compact-filter-row">
+                  <input className="search compact-name-filter" value={cmdbPanel === "categories" ? cmdbCategoryFilter : cmdbPanel === "types" ? cmdbTypeFilter : cmdbRelationshipTypeFilter} onChange={(e) => cmdbPanel === "categories" ? setCmdbCategoryFilter(e.target.value) : cmdbPanel === "types" ? setCmdbTypeFilter(e.target.value) : setCmdbRelationshipTypeFilter(e.target.value)} placeholder="Filter name"/>
+                  <button type="button" className="primary compact" onClick={() => setShowCmdbAdd((value) => !value)}>+ Add</button>
+                </div>
+              </div>
+              {showCmdbAdd && cmdbPanel === "categories" && <form className="admin-form inline-add-form" onSubmit={createCiCategory}>
+                <h3>Add CI Category</h3>
                 <label>Name<input required value={newCiCategory.name} onChange={(e) => setNewCiCategory({ ...newCiCategory, name: e.target.value })} /></label>
                 <label>Description<textarea rows={3} value={newCiCategory.description} onChange={(e) => setNewCiCategory({ ...newCiCategory, description: e.target.value })} /></label>
-                <button className="primary" disabled={busy}>Save category</button>
+                <div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowCmdbAdd(false)}>Cancel</button><button className="primary" disabled={busy}>Save category</button></div>
               </form>}
-              {cmdbPanel === "types" && <form className="admin-form" onSubmit={createCiType}>
-                <h2>Add CI Type</h2>
+              {showCmdbAdd && cmdbPanel === "types" && <form className="admin-form inline-add-form" onSubmit={createCiType}>
+                <h3>Add CI Type</h3>
                 <label>Category<select required value={newCiType.categoryId} onChange={(e) => setNewCiType({ ...newCiType, categoryId: e.target.value })}>{cmdbSettings.categories.filter((category) => category.active !== false).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
                 <label>Name<input required value={newCiType.name} onChange={(e) => setNewCiType({ ...newCiType, name: e.target.value })} /></label>
                 <label>Description<textarea rows={3} value={newCiType.description} onChange={(e) => setNewCiType({ ...newCiType, description: e.target.value })} /></label>
-                <button className="primary" disabled={busy || !newCiType.categoryId}>Save type</button>
+                <div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowCmdbAdd(false)}>Cancel</button><button className="primary" disabled={busy || !newCiType.categoryId}>Save type</button></div>
               </form>}
-              {cmdbPanel === "relationship-types" && <form className="admin-form" onSubmit={createCiRelationshipType}>
-                <h2>Add Relationship Type</h2>
+              {showCmdbAdd && cmdbPanel === "relationship-types" && <form className="admin-form inline-add-form" onSubmit={createCiRelationshipType}>
+                <h3>Add Relationship Type</h3>
                 <label>Name<input required value={newCiRelationshipType.name} onChange={(e) => setNewCiRelationshipType({ ...newCiRelationshipType, name: e.target.value })} /></label>
                 <label>Description<textarea rows={3} value={newCiRelationshipType.description} onChange={(e) => setNewCiRelationshipType({ ...newCiRelationshipType, description: e.target.value })} /></label>
-                <button className="primary" disabled={busy}>Save relationship type</button>
+                <div className="modal-actions"><button type="button" className="secondary" onClick={() => setShowCmdbAdd(false)}>Cancel</button><button className="primary" disabled={busy}>Save relationship type</button></div>
               </form>}
-            </div>
-            <div className="admin-list">
-              {cmdbPanel === "categories" && <>
-                <h2>CI Categories</h2>
-                {cmdbSettings.categories.map((category) => <article key={category.id}><div><input defaultValue={category.name} onBlur={(e) => e.target.value !== category.name && updateCiCategory(category, { name: e.target.value })} /><small><input defaultValue={category.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (category.description || "") && updateCiCategory(category, { description: e.target.value })} /></small></div><button className="secondary small" disabled={busy} onClick={() => updateCiCategory(category, { active: category.active === false })}>{category.active === false ? "Activate" : "Deactivate"}</button></article>)}
-              </>}
-              {cmdbPanel === "types" && <>
-                <h2>CI Types</h2>
-                {cmdbSettings.types.map((type) => <article key={type.id}><div><input defaultValue={type.name} onBlur={(e) => e.target.value !== type.name && updateCiType(type, { name: e.target.value })} /><small><input defaultValue={type.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (type.description || "") && updateCiType(type, { description: e.target.value })} /></small></div><select value={type.categoryId} disabled={busy} onChange={(e) => updateCiType(type, { categoryId: e.target.value })}>{cmdbSettings.categories.filter((category) => category.active !== false).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button className="secondary small" disabled={busy} onClick={() => updateCiType(type, { active: type.active === false })}>{type.active === false ? "Activate" : "Deactivate"}</button></article>)}
-              </>}
-              {cmdbPanel === "relationship-types" && <>
-                <h2>Relationship Types</h2>
-                {cmdbSettings.relationshipTypes.map((type) => <article key={type.id}><div><input defaultValue={type.name} onBlur={(e) => e.target.value !== type.name && updateCiRelationshipType(type, { name: e.target.value })} /><small><input defaultValue={type.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (type.description || "") && updateCiRelationshipType(type, { description: e.target.value })} /></small></div><button className="secondary small" disabled={busy} onClick={() => updateCiRelationshipType(type, { active: type.active === false })}>{type.active === false ? "Activate" : "Deactivate"}</button></article>)}
-              </>}
+              {cmdbPanel === "categories" && <div className="table-wrap cmdb-settings-table"><table><thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredCiCategories.map((category) => <tr key={category.id}><td><input defaultValue={category.name} onBlur={(e) => e.target.value !== category.name && updateCiCategory(category, { name: e.target.value })} /></td><td><input defaultValue={category.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (category.description || "") && updateCiCategory(category, { description: e.target.value })} /></td><td><span className={`badge ${category.active === false ? "closed" : "open"}`}>{category.active === false ? "Inactive" : "Active"}</span></td><td><button className="secondary small" disabled={busy} onClick={() => updateCiCategory(category, { active: category.active === false })}>{category.active === false ? "Activate" : "Deactivate"}</button></td></tr>)}</tbody></table></div>}
+              {cmdbPanel === "types" && <div className="table-wrap cmdb-settings-table"><table><thead><tr><th>Name</th><th>Category</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredCiTypes.map((type) => <tr key={type.id}><td><input defaultValue={type.name} onBlur={(e) => e.target.value !== type.name && updateCiType(type, { name: e.target.value })} /></td><td><select value={type.categoryId} disabled={busy} onChange={(e) => updateCiType(type, { categoryId: e.target.value })}>{cmdbSettings.categories.filter((category) => category.active !== false).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></td><td><input defaultValue={type.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (type.description || "") && updateCiType(type, { description: e.target.value })} /></td><td><span className={`badge ${type.active === false ? "closed" : "open"}`}>{type.active === false ? "Inactive" : "Active"}</span></td><td><button className="secondary small" disabled={busy} onClick={() => updateCiType(type, { active: type.active === false })}>{type.active === false ? "Activate" : "Deactivate"}</button></td></tr>)}</tbody></table></div>}
+              {cmdbPanel === "relationship-types" && <div className="table-wrap cmdb-settings-table"><table><thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredCiRelationshipTypes.map((type) => <tr key={type.id}><td><input defaultValue={type.name} onBlur={(e) => e.target.value !== type.name && updateCiRelationshipType(type, { name: e.target.value })} /></td><td><input defaultValue={type.description || ""} placeholder="Description" onBlur={(e) => e.target.value !== (type.description || "") && updateCiRelationshipType(type, { description: e.target.value })} /></td><td><span className={`badge ${type.active === false ? "closed" : "open"}`}>{type.active === false ? "Inactive" : "Active"}</span></td><td><button className="secondary small" disabled={busy} onClick={() => updateCiRelationshipType(type, { active: type.active === false })}>{type.active === false ? "Activate" : "Deactivate"}</button></td></tr>)}</tbody></table></div>}
             </div>
           </div>
         )}
@@ -1939,6 +1994,111 @@ export default function AdminConsole({
               ))}
             </div>}
           </div>
+        )}
+        {tab === "service-portal" && (
+          <form className="admin-grid service-portal-admin" onSubmit={savePortalSettings}>
+            <div className="admin-form admin-card-menu">
+              <button type="button" className="secondary active">Portal settings</button>
+              <button type="button" className="secondary" disabled>Future branding</button>
+            </div>
+            <div className="settings-column">
+              <div className="admin-form settings-section">
+                <h2>General</h2>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={portalSettings.portalEnabled}
+                    onChange={(e) => setPortalSettings({ ...portalSettings, portalEnabled: e.target.checked })}
+                  />
+                  Enable Service Portal
+                </label>
+                <label>
+                  Portal name
+                  <input
+                    required
+                    value={portalSettings.portalName}
+                    onChange={(e) => setPortalSettings({ ...portalSettings, portalName: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Welcome message
+                  <textarea
+                    rows={2}
+                    value={portalSettings.welcomeMessage}
+                    onChange={(e) => setPortalSettings({ ...portalSettings, welcomeMessage: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Default landing page
+                  <select
+                    value={portalSettings.defaultLandingPage}
+                    onChange={(e) => setPortalSettings({ ...portalSettings, defaultLandingPage: e.target.value as ServicePortalSettings["defaultLandingPage"] })}
+                  >
+                    <option value="HOME">Home</option>
+                    <option value="MY_INCIDENTS">My Incidents</option>
+                    <option value="MY_REQUESTS">My Service Requests</option>
+                    <option value="KNOWLEDGE">Knowledge Base</option>
+                  </select>
+                </label>
+              </div>
+              <div className="admin-form settings-section">
+                <h2>Knowledge</h2>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.knowledgeEnabled} onChange={(e) => setPortalSettings({ ...portalSettings, knowledgeEnabled: e.target.checked })} />Enable Knowledge Base</label>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.allowKbSearch} onChange={(e) => setPortalSettings({ ...portalSettings, allowKbSearch: e.target.checked })} />Allow KB search</label>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.allowKbRatings} onChange={(e) => setPortalSettings({ ...portalSettings, allowKbRatings: e.target.checked })} />Allow KB ratings (future)</label>
+              </div>
+              <div className="admin-form settings-section">
+                <h2>Broadcast banner</h2>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.bannerEnabled} onChange={(e) => setPortalSettings({ ...portalSettings, bannerEnabled: e.target.checked })} />Enable banner</label>
+                <label>
+                  Banner message
+                  <textarea
+                    rows={2}
+                    required={portalSettings.bannerEnabled}
+                    value={portalSettings.bannerMessage}
+                    onChange={(e) => setPortalSettings({ ...portalSettings, bannerMessage: e.target.value })}
+                    placeholder="Scheduled maintenance tonight from 10 PM to 11 PM."
+                  />
+                </label>
+                <div className="color-fields">
+                  <label>
+                    Background
+                    <input type="color" value={portalSettings.bannerBackgroundColor} onChange={(e) => setPortalSettings({ ...portalSettings, bannerBackgroundColor: e.target.value })} />
+                  </label>
+                  <label>
+                    Text
+                    <input type="color" value={portalSettings.bannerTextColor} onChange={(e) => setPortalSettings({ ...portalSettings, bannerTextColor: e.target.value })} />
+                  </label>
+                </div>
+                <label>
+                  Priority
+                  <select value={portalSettings.bannerPriority} onChange={(e) => setPortalSettings({ ...portalSettings, bannerPriority: e.target.value as ServicePortalSettings["bannerPriority"] })}>
+                    <option value="INFORMATION">Information</option>
+                    <option value="WARNING">Warning</option>
+                    <option value="CRITICAL">Critical</option>
+                  </select>
+                </label>
+                {portalSettings.bannerEnabled && (
+                  <div className="portal-banner-preview" style={{ background: portalSettings.bannerBackgroundColor, color: portalSettings.bannerTextColor }}>
+                    {portalSettings.bannerMessage || "Banner preview"}
+                  </div>
+                )}
+              </div>
+              <div className="admin-form settings-section">
+                <h2>Visibility</h2>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.allowIncidentCreation} onChange={(e) => setPortalSettings({ ...portalSettings, allowIncidentCreation: e.target.checked })} />Allow incident creation</label>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.allowServiceRequests} onChange={(e) => setPortalSettings({ ...portalSettings, allowServiceRequests: e.target.checked })} />Allow service requests</label>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.allowEmployeeCloseTicket} onChange={(e) => setPortalSettings({ ...portalSettings, allowEmployeeCloseTicket: e.target.checked })} />Allow employees to close tickets</label>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.showRecentTickets} onChange={(e) => setPortalSettings({ ...portalSettings, showRecentTickets: e.target.checked })} />Show recent tickets</label>
+                <label className="check-row"><input type="checkbox" checked={portalSettings.showMyRequests} onChange={(e) => setPortalSettings({ ...portalSettings, showMyRequests: e.target.checked })} />Show my requests</label>
+              </div>
+              <div className="admin-form settings-section future-settings">
+                <h2>Future</h2>
+                <p className="muted">Reserved for portal logo, theme, homepage widgets, announcements and FAQ. The data model is separated so these can be added without redesigning the portal.</p>
+              </div>
+              <button className="primary settings-save" disabled={busy}>{busy ? "Saving…" : "Save Service Portal settings"}</button>
+            </div>
+          </form>
         )}
         {tab === "settings" && (
           <form className="admin-grid" onSubmit={saveSettings}>

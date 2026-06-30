@@ -4,7 +4,7 @@ AI-first, lightweight IT service management platform for small and mid-sized org
 
 ## Current status
 
-The PostgreSQL foundation, incident-management slice, service-request foundation, problem foundation, change foundation, CMDB foundation, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
+The PostgreSQL foundation, incident-management slice, service-request foundation, problem foundation, change foundation, CMDB foundation, knowledge foundation, dedicated Self-Service Portal, admin console, storage configuration, SLA lifecycle, and analytics foundation are operational.
 
 Completed in the current MVP:
 
@@ -21,6 +21,8 @@ Completed in the current MVP:
 - Problem Management foundation with PRB records, root cause, workaround, permanent fix, known-error flag, assignment/status/work notes, and PTasks
 - Change Management foundation with CHG records, change type, risk/impact, planned window, implementation/backout/test plans, assignment/status/work notes, and related items
 - CMDB foundation with configuration items, category/type lookup tables, CI relationships, related ticket visibility, CSV import preview/validation/import, and Admin Console CMDB Settings
+- Knowledge Management foundation with KB article creation/editing, published article search, ticket-to-KB linking, and automatic work notes when a KB article is used
+- Dedicated Self-Service Portal for employee users with Home, My Incidents, My Service Requests, Knowledge Base, Profile, portal-scoped APIs, and Admin Console Service Portal settings
 - Sequential incident numbers such as `INC000002`
 - Assignment groups and group membership
 - Related child incidents, changes, and problems
@@ -33,10 +35,10 @@ Completed in the current MVP:
 - Ticket attachment upload, listing, download, deletion, metadata, permissions, and audit logging
 - Storage adapters for local/on-premises filesystems, Amazon S3, Azure Blob, Google Cloud Storage, and MinIO/S3-compatible services
 - Analytics Console with Incident and Service Request module reporting, KPIs, trends, SLA outcomes, aging, workload reporting, filters, scoped access, and CSV export
-- Admin Console for users, departments, assignment groups, service catalogue, approval rules, CMDB categories/types/relationship types, SLA policies, business calendars, branding, theme defaults, and attachment storage
+- Admin Console for users, departments, assignment groups, service catalogue, approval rules, CMDB categories/types/relationship types, SLA policies, business calendars, Service Portal settings, branding, theme defaults, and attachment storage
 - Backend Docker and Compose preparation; no image is currently built or deployed
 
-Knowledge, notifications, advanced reporting, graphical CMDB dependency maps, and AI interfaces are not yet implemented in the application layer. Service Requests, Problems, Changes, and CMDB now have first workflow slices, but richer workflow automation, approvals/CAB, reporting, relationship import/export, and cross-module analytics are still upcoming.
+Notifications, advanced reporting, graphical CMDB dependency maps, and AI interfaces are not yet implemented in the application layer. Service Requests, Problems, Changes, CMDB, Knowledge, and the Self-Service Portal now have first workflow slices, but richer workflow automation, approvals/CAB, reporting, relationship import/export, customer-visible work-note flags, account-management preferences, and cross-module analytics are still upcoming.
 
 ## Architecture
 
@@ -124,6 +126,9 @@ npx.cmd prisma db execute --file prisma/manual/020_change_workflow_statuses.sql 
 npx.cmd prisma db execute --file prisma/manual/021_change_approvals.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/022_cmdb_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma db execute --file prisma/manual/023_cmdb_lookup_admin.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/024_knowledge_foundation.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/025_problem_impact_risk_details.sql --schema prisma/schema.prisma
+npx.cmd prisma db execute --file prisma/manual/026_service_portal_foundation.sql --schema prisma/schema.prisma
 npx.cmd prisma generate
 ```
 
@@ -238,6 +243,27 @@ CMDB:
 - `POST /api/configuration-items/import/preview`
 - `POST /api/configuration-items/import/confirm`
 
+Knowledge:
+
+- `GET /api/knowledge`
+- `GET /api/knowledge/search`
+- `POST /api/knowledge`
+- `GET /api/knowledge/:id`
+- `PATCH /api/knowledge/:id`
+- `GET /api/tickets/:ticketId/knowledge`
+- `POST /api/tickets/:ticketId/knowledge/:knowledgeArticleId`
+- `DELETE /api/tickets/:ticketId/knowledge/:knowledgeArticleId`
+
+Service Portal:
+
+- `GET /api/service-portal/settings`
+- `PUT /api/service-portal/settings`
+- `PATCH /api/service-portal/settings`
+- `GET /api/service-portal/banner`
+- `GET /api/service-portal/knowledge`
+- `GET /api/service-portal/my-incidents`
+- `GET /api/service-portal/my-requests`
+
 Supporting endpoints:
 
 - `GET /api/assignment-groups`
@@ -276,9 +302,18 @@ The Admin Console uses a left-side feature navigator and right-side workspace pa
 - **Service Catalogue**: manage categories as tiles, drill into catalogue items, edit categories/items, add approval rules, and add simple form fields/task templates without hand-writing JSON.
 - **CMDB Settings**: manage CI categories, category-filtered CI types, and CI relationship types. Configuration items store lookup references (`ci_category_id`, `ci_type_id`) instead of hardcoded category/type strings.
 - **SLA Policies**: create SLA policies and business calendars, and deactivate existing policy versions.
+- **Service Portal**: enable/disable the employee portal, set portal name/welcome message/default landing page, control employee KB search, manage sticky broadcast banner settings, and control incident/request visibility options.
 - **Branding & Storage**: configure organization identity, logo/favicon, colors, theme defaults, attachment provider, storage location, and connection testing.
 
 Catalogue item form schema and task templates are stored as JSON so the platform remains flexible, but the admin UI provides helper controls for the common cases. Generated request tasks are created after approvals are complete, or immediately when the catalogue item does not require approval.
+
+## Self-Service Portal
+
+Employee-only users are routed to a dedicated Self-Service Portal instead of the agent workspace. The portal has its own Home, My Incidents, My Service Requests, Knowledge Base, and Profile navigation. It shares the same authentication and tenant isolation, but employees do not see Problems, Changes, CMDB, Analytics, or Administration.
+
+Portal controls are stored per organization in `service_portal_settings` and can be changed from **Admin Console -> Service Portal** without restarting the app. The broadcast banner is sticky at the top of every portal page when enabled, and the backend enforces the banner-message validation rule.
+
+Portal ticket APIs only return incidents and service requests created by, opened by, or requested for the current user. Portal comments use the normal ticket comment endpoints. Internal work notes are not exposed in the portal until a dedicated customer-visible work-note flag is added.
 
 ## SLA foundation
 
@@ -337,4 +372,5 @@ Before production use, the project still requires automated tests, managed migra
 4. Expand Problem Management with known-error database behavior, root-cause analytics, and incident-to-problem workflows.
 5. Expand Change Management automation, CAB scheduling, and risk workflows.
 6. Expand CMDB with relationship import/update import, CSV export, and graphical dependency maps.
-7. Add knowledge management, notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.
+7. Expand Knowledge and Service Portal with ratings, recently viewed persistence, password-change/account preferences, announcements, FAQ, and AI knowledge search.
+8. Add notifications, AI-assisted operations, production monitoring, managed migrations, and deployment automation.

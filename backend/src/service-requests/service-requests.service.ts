@@ -6,7 +6,7 @@ import { enforceClosedTicketPolicy } from '../common/ticket-status.policy';
 import { PrismaService } from '../prisma/prisma.service';
 import { addSlaMinutes } from '../sla/sla-calendar';
 import { SlaService } from '../sla/sla.service';
-import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateApprovalRuleDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto } from './dto/service-catalog.dto';
+import { CreateApprovalRuleDto, CreateServiceCategoryDto, CreateServiceCatalogItemDto, CreateServiceRequestDto, DecideApprovalDto, UpdateApprovalRuleDto, UpdateRequestTaskDto, UpdateServiceCategoryDto, UpdateServiceCatalogItemDto, UpdateServiceRequestDto } from './dto/service-catalog.dto';
 import { AddCommentDto, AssignIncidentDto } from '../incidents/dto/incident-actions.dto';
 
 const serviceRequestInclude = {
@@ -263,6 +263,28 @@ export class ServiceRequestsService {
     });
     if (!ticket) throw new NotFoundException('Service request not found');
     return ticket;
+  }
+
+  async update(user: AuthUser, id: string, dto: UpdateServiceRequestDto) {
+    requireServiceDeskRole(user);
+    const ticket = await this.findOne(user, id);
+    const updated = await this.prisma.ticket.update({
+      where: { id },
+      data: { title: dto.title, description: dto.description, updatedAt: new Date() },
+      include: serviceRequestInclude,
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId: ticket.organizationId,
+        tableName: 'tickets',
+        recordId: id,
+        action: 'UPDATE_SERVICE_REQUEST',
+        oldValue: { title: ticket.title, description: ticket.description },
+        newValue: dto as Prisma.InputJsonValue,
+        changedById: user.id,
+      },
+    });
+    return updated;
   }
 
   async changeStatus(user: AuthUser, id: string, statusName: string) {
