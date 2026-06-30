@@ -856,6 +856,7 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
   const [active, setActive] = useState<"HOME" | "INCIDENTS" | "REQUESTS" | "KNOWLEDGE" | "PROFILE">("HOME");
   const [settings, setSettings] = useState<ServicePortalSettings | null>(null);
   const [banner, setBanner] = useState<ServicePortalBanner>({ enabled: false });
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [requests, setRequests] = useState<Incident[]>([]);
   const [catalog, setCatalog] = useState<ServiceCatalogCategory[]>([]);
@@ -877,6 +878,7 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
       .then(([portalSettings, portalBanner, incidentValues, requestValues, catalogValues, profileValue]) => {
         setSettings(portalSettings);
         setBanner(portalBanner);
+        setBannerDismissed(false);
         setIncidents(incidentValues);
         setRequests(requestValues);
         setCatalog(catalogValues);
@@ -903,7 +905,6 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
 
   return (
     <div className="portal-shell">
-      {banner.enabled && <div className="portal-broadcast" style={{ background: banner.backgroundColor || "#dc2626", color: banner.textColor || "#fff" }}>{banner.message}</div>}
       <header className="portal-topbar">
         <Brand branding={{ ...branding, portalTitle: settings?.portalName || branding.portalTitle }} />
         <nav>
@@ -915,6 +916,7 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
         </nav>
         <button className="secondary small" onClick={onLogout}>Sign out</button>
       </header>
+      {banner.enabled && !bannerDismissed && <div className="portal-broadcast"><span>!</span><strong>{banner.message}</strong><button type="button" aria-label="Dismiss banner" onClick={() => setBannerDismissed(true)}>×</button></div>}
       <main className="portal-main">
         {loading ? <div className="empty">Loading Service Portal…</div> : error ? <div className="error">{error}</div> : portalDisabled ? <div className="empty"><b>Service Portal is currently disabled.</b><span>Please contact your administrator.</span></div> : selectedTicket ? (
           <PortalTicketDetail
@@ -931,14 +933,17 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
         ) : active === "HOME" ? (
           <>
             <section className="portal-hero">
-              <p className="eyebrow">Welcome</p>
-              <h1>{settings?.welcomeMessage || "How can we help today?"}</h1>
-              <p>Raise an issue, request a service, search knowledge, or track your open work from one clean place.</p>
+              <div>
+                <p className="eyebrow">Welcome</p>
+                <h1>{settings?.welcomeMessage || "How can we help today?"}</h1>
+                <p>Raise an issue, request a service, search knowledge, or track your open work from one clean place.</p>
+              </div>
+              <div className="portal-hero-art" aria-hidden="true"><span>?</span><b>●●●</b></div>
             </section>
             <section className="portal-quick-actions">
-              {settings?.allowIncidentCreation && <button onClick={() => setCreatingIncident(true)}><span>Raise Incident</span><small>Something is broken or degraded</small></button>}
-              {settings?.allowServiceRequests && <button onClick={() => setCreatingRequest(true)}><span>Request Service</span><small>Access, software, devices, help</small></button>}
-              {settings?.knowledgeEnabled && <button onClick={() => setActive("KNOWLEDGE")}><span>Search Knowledge</span><small>Find known fixes and guides</small></button>}
+              {settings?.allowIncidentCreation && <button onClick={() => setCreatingIncident(true)}><span className="portal-action-icon incident">◎</span><span>Raise an Incident</span><small>Report something broken or degraded</small><em>›</em></button>}
+              {settings?.allowServiceRequests && <button onClick={() => setCreatingRequest(true)}><span className="portal-action-icon request">🛒</span><span>Request a Service</span><small>Request access, software, or other services</small><em>›</em></button>}
+              {settings?.knowledgeEnabled && <button onClick={() => setActive("KNOWLEDGE")}><span className="portal-action-icon knowledge">⌕</span><span>Search Knowledge</span><small>Find solutions, guides, and how-to articles</small><em>›</em></button>}
             </section>
             <section className="portal-card-grid">
               {settings?.showRecentTickets && <PortalTicketList title="Recent tickets" tickets={recentTickets} onOpen={(type, ticket) => setSelectedTicket({ type, ticket })} />}
