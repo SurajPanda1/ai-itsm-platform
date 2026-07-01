@@ -143,7 +143,7 @@ export class ServicePortalService {
       FROM knowledge_articles
       WHERE organization_id=${user.organizationId}::uuid
         AND status='PUBLISHED'
-        AND visibility IN ('PUBLIC', 'EMPLOYEES')
+        AND visibility='EMPLOYEES'
         AND (${categoryFilter}='' OR category ILIKE ${categoryFilter})
         AND (
           ${term}='' OR title ILIKE ${pattern} OR summary ILIKE ${pattern}

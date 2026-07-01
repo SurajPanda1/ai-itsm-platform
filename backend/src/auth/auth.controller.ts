@@ -1,7 +1,10 @@
-import { Body, Controller, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { AuthUser } from './auth-user';
 import { AuthService } from './auth.service';
-import { LoginDto } from './login.dto';
+import { CurrentUser } from './current-user.decorator';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { ChangePasswordDto, LoginDto } from './login.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -29,6 +32,12 @@ export class AuthController {
   logout(@Res({ passthrough: true }) response: Response) {
     response.clearCookie('refresh_token', { httpOnly: true, sameSite: 'lax', path: '/api/auth' });
     return { loggedOut: true };
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
+    return this.auth.changePassword(user.id, dto.currentPassword, dto.newPassword);
   }
 
   private setRefreshCookie(response: Response, token: string) {

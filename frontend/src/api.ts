@@ -41,6 +41,7 @@ export const api = {
   analytics: (token:string,query:string) => request<AnalyticsReport>(`/analytics?${query}`,{},token),
   exportAnalytics: async (token:string,query:string) => { const response=await fetch(`${API_URL}/analytics/export.csv?${query}`,{headers:{authorization:`Bearer ${token}`}});if(!response.ok)throw new Error('Could not export analytics');const module=new URLSearchParams(query).get('module')||'tickets';const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=`${module.toLowerCase()}-analytics.csv`;link.click();URL.revokeObjectURL(url); },
   login: (email: string, password: string) => request<Session>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  changePassword: (token: string, input: { currentPassword: string; newPassword: string }) => request<{ changed: boolean }>('/auth/change-password', { method: 'POST', body: JSON.stringify(input) }, token),
   incidents: (token: string) => request<Incident[]>('/incidents', {}, token),
   incident: (token: string, id: string) => request<Incident>(`/incidents/${id}`, {}, token),
   userSearch: (token: string, query: string) => request<Pick<User, 'id' | 'name' | 'email'>[]>(`/users/search?q=${encodeURIComponent(query)}`, {}, token),

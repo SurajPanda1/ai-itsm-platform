@@ -11,6 +11,7 @@ const articleSelect = {
   title: true,
   category: true,
   status: true,
+  visibility: true,
   summary: true,
   content: true,
   keywords: true,
@@ -48,7 +49,7 @@ export class KnowledgeService {
     const tokens = this.tokens(term);
     const rows = await this.prisma.knowledgeArticle.findMany({
       where: { organizationId: user.organizationId, status: 'PUBLISHED', ...(term ? this.searchWhere(term) : {}) },
-      select: { id: true, articleNumber: true, title: true, category: true, status: true, summary: true, content: true, keywords: true, updatedAt: true },
+      select: { id: true, articleNumber: true, title: true, category: true, status: true, visibility: true, summary: true, content: true, keywords: true, updatedAt: true },
       orderBy: { updatedAt: 'desc' },
       take: 50,
     });
@@ -86,6 +87,7 @@ export class KnowledgeService {
           title: dto.title,
           category: dto.category,
           status,
+          visibility: dto.visibility ?? 'EMPLOYEES',
           summary: dto.summary,
           content: dto.content,
           keywords: dto.keywords,
@@ -111,6 +113,7 @@ export class KnowledgeService {
           title: dto.title,
           category: dto.category,
           status: dto.status,
+          visibility: dto.visibility,
           summary: dto.summary,
           content: dto.content,
           keywords: dto.keywords,

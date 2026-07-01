@@ -852,6 +852,69 @@ function PortalTicketDetail({ ticket, type, token, onClose, onUpdated }: { ticke
   );
 }
 
+function ChangePasswordModal({
+  token,
+  onClose,
+}: {
+  token: string;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    if (form.newPassword !== form.confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.changePassword(token, { currentPassword: form.currentPassword, newPassword: form.newPassword });
+      setSuccess("Password changed successfully.");
+      setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not change password");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form className="modal portal-modal change-password-modal" onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">ACCOUNT SECURITY</p>
+            <h2>Change password</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose}>×</button>
+        </div>
+        <label>
+          Current password
+          <input type="password" autoComplete="current-password" minLength={8} required value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} />
+        </label>
+        <label>
+          New password
+          <input type="password" autoComplete="new-password" minLength={8} required value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} />
+        </label>
+        <label>
+          Confirm new password
+          <input type="password" autoComplete="new-password" minLength={8} required value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} />
+        </label>
+        {error && <div className="error">{error}</div>}
+        {success && <div className="success">{success}</div>}
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={busy}>{busy ? "Changing…" : "Change password"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function ServicePortal({ session, branding, onLogout }: { session: Session; branding: Branding; onLogout: () => void }) {
   const [active, setActive] = useState<"HOME" | "INCIDENTS" | "REQUESTS" | "KNOWLEDGE" | "PROFILE">("HOME");
   const [settings, setSettings] = useState<ServicePortalSettings | null>(null);
@@ -867,6 +930,7 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
   const [selectedTicket, setSelectedTicket] = useState<{ type: "incident" | "request"; ticket: Incident } | null>(null);
   const [creatingIncident, setCreatingIncident] = useState(false);
   const [creatingRequest, setCreatingRequest] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const token = session.accessToken;
@@ -902,11 +966,12 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
   const recentTickets = [...incidents, ...requests].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
   const recentKb = kbResults.slice(0, 3);
   const portalDisabled = settings && !settings.portalEnabled;
+  const welcomeName = profile?.name || session.user.name;
 
   return (
     <div className="portal-shell">
       <header className="portal-topbar">
-        <Brand branding={{ ...branding, portalTitle: settings?.portalName || branding.portalTitle }} />
+        <Brand branding={branding} />
         <nav>
           <button className={active === "HOME" ? "active" : ""} onClick={() => { setSelectedTicket(null); setActive("HOME"); }}>Home</button>
           <button className={active === "INCIDENTS" ? "active" : ""} onClick={() => { setSelectedTicket(null); setActive("INCIDENTS"); }}>My Incidents</button>
@@ -916,7 +981,7 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
         </nav>
         <button className="secondary small" onClick={onLogout}>Sign out</button>
       </header>
-      {banner.enabled && !bannerDismissed && <div className="portal-broadcast"><span>!</span><strong>{banner.message}</strong><button type="button" aria-label="Dismiss banner" onClick={() => setBannerDismissed(true)}>×</button></div>}
+      {banner.enabled && !bannerDismissed && <div className="portal-broadcast" style={{ background: banner.backgroundColor || undefined, color: banner.textColor || undefined }}><span>!</span><strong>{banner.message}</strong><button type="button" aria-label="Dismiss banner" onClick={() => setBannerDismissed(true)}>×</button></div>}
       <main className="portal-main">
         {loading ? <div className="empty">Loading Service Portal…</div> : error ? <div className="error">{error}</div> : portalDisabled ? <div className="empty"><b>Service Portal is currently disabled.</b><span>Please contact your administrator.</span></div> : selectedTicket ? (
           <PortalTicketDetail
@@ -934,7 +999,7 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
           <>
             <section className="portal-hero">
               <div>
-                <p className="eyebrow">Welcome</p>
+                <p className="eyebrow portal-welcome-name">Welcome{welcomeName ? `, ${welcomeName}` : ""}</p>
                 <h1>{settings?.welcomeMessage || "How can we help today?"}</h1>
                 <p>Raise an issue, request a service, search knowledge, or track your open work from one clean place.</p>
               </div>
@@ -970,12 +1035,13 @@ function ServicePortal({ session, branding, onLogout }: { session: Session; bran
         ) : (
           <section className="portal-profile">
             <article><h2>Profile</h2><div className="portal-record-grid"><div><span>Name</span><b>{profile?.name || session.user.name}</b></div><div><span>Email</span><b>{profile?.email || session.user.email}</b></div><div><span>Department</span><b>{profile?.department?.name || "Not configured"}</b></div><div><span>Manager</span><b>{profile?.manager?.name || "Not configured"}</b></div><div><span>Phone</span><b>{profile?.phone || "Not configured"}</b></div><div><span>Language</span><b>{profile?.language || "English"}</b></div><div><span>Timezone</span><b>{Intl.DateTimeFormat().resolvedOptions().timeZone}</b></div></div></article>
-            <article><h2>Password & notifications</h2><p className="muted">Password change and notification preferences are reserved here for the next account-management iteration.</p></article>
+            <article className="portal-account-card"><h2>Password & notifications</h2><button type="button" className="primary compact" onClick={() => setChangingPassword(true)}>Change Password</button><div className="notification-preferences" aria-disabled="true"><h3>Notification Preferences</h3>{["Browser notification", "Daily digest", "Ticket updates", "Request approvals"].map((item) => <label className="check-row disabled-option" key={item}><input type="checkbox" disabled />{item}</label>)}</div><p className="muted">Notification preferences are reserved for the next account-management iteration.</p></article>
           </section>
         )}
       </main>
       {creatingIncident && <PortalCreateIncident token={token} currentUser={session.user} onClose={() => setCreatingIncident(false)} onCreated={(incident) => { setIncidents((items) => [incident, ...items]); setCreatingIncident(false); setActive("INCIDENTS"); }} />}
       {creatingRequest && <PortalCreateRequest token={token} currentUser={session.user} catalog={catalog} onClose={() => setCreatingRequest(false)} onCreated={(request) => { setRequests((items) => [request, ...items]); setCreatingRequest(false); setActive("REQUESTS"); }} />}
+      {changingPassword && <ChangePasswordModal token={token} onClose={() => setChangingPassword(false)} />}
       {selectedArticle && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setSelectedArticle(null)}><article className="modal portal-modal"><div className="modal-head"><div><p className="eyebrow">{selectedArticle.articleNumber}</p><h2>{selectedArticle.title}</h2></div><button type="button" className="icon-button" onClick={() => setSelectedArticle(null)}>×</button></div><p className="muted">{selectedArticle.category} · Updated {formatShortDate(selectedArticle.updatedAt)}</p><p>{selectedArticle.summary}</p><div className="kb-content">{selectedArticle.content || "No article content added yet."}</div></article></div>}
     </div>
   );
@@ -2012,7 +2078,13 @@ function ChangeDetail({ change, token, canEdit, canReopen, groups, onUpdated, on
   </section>;
 }
 
-const emptyKnowledgeForm = { title: "", category: "General", status: "DRAFT", summary: "", content: "", keywords: "" };
+const knowledgeAudienceOptions = [
+  { value: "EMPLOYEES", label: "Employees / Service Portal" },
+  { value: "IT_AGENTS", label: "IT Agents" },
+  { value: "IT_MANAGERS", label: "IT Service Managers" },
+  { value: "ADMINS", label: "Admins" },
+] as const;
+const emptyKnowledgeForm = { title: "", category: "General", status: "DRAFT", visibility: "EMPLOYEES", summary: "", content: "", keywords: "" };
 function KnowledgeModule({ token, user }: { token: string; user: User }) {
   const canManage = user.roles.some((role) => role !== "EMPLOYEE");
   const [articles, setArticles] = useState<KnowledgeArticle[]>([]);
@@ -2053,7 +2125,7 @@ function KnowledgeModule({ token, user }: { token: string; user: User }) {
   function startCreate() { setSelected(null); setEditing({ id: "", articleNumber: "New", title: "", category: "General", status: "DRAFT", createdAt: "", updatedAt: "" }); setForm(emptyKnowledgeForm); }
   function startEdit(article: KnowledgeArticle) {
     setEditing(article); setSelected(null);
-    setForm({ title: article.title, category: article.category, status: article.status, summary: article.summary || "", content: article.content || "", keywords: article.keywords || "" });
+    setForm({ title: article.title, category: article.category, status: article.status, visibility: article.visibility || "EMPLOYEES", summary: article.summary || "", content: article.content || "", keywords: article.keywords || "" });
   }
   async function save(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setSuccess("");
@@ -2061,7 +2133,7 @@ function KnowledgeModule({ token, user }: { token: string; user: User }) {
       const payload = { ...form, title: form.title.trim() };
       const saved = editing?.id ? await api.updateKnowledgeArticle(token, editing.id, payload) : await api.createKnowledgeArticle(token, payload);
       setSuccess(`${saved.articleNumber} saved.`);
-      setEditing(saved); setForm({ title: saved.title, category: saved.category, status: saved.status, summary: saved.summary || "", content: saved.content || "", keywords: saved.keywords || "" });
+      setEditing(saved); setForm({ title: saved.title, category: saved.category, status: saved.status, visibility: saved.visibility || "EMPLOYEES", summary: saved.summary || "", content: saved.content || "", keywords: saved.keywords || "" });
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save knowledge article");
@@ -2072,10 +2144,10 @@ function KnowledgeModule({ token, user }: { token: string; user: User }) {
       <header><div><p className="eyebrow">Knowledge</p><h1>Knowledge Base</h1><p>Create, publish, archive, and reuse support knowledge.</p></div>{canManage && <button className="primary compact" onClick={startCreate}>Create KB article</button>}</header>
       {success && <div className="success">{success}</div>}{error && <div className="error">{error}</div>}
       <div className="table-card"><div className="table-head"><div><h2>Articles</h2><p>{loading ? "Loading…" : `${total} article(s), 20 per page`}</p></div><div className="queue-filters"><input className="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, content, category" /><select value={category} onChange={(e) => setCategory(e.target.value)}><option value="">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{["DRAFT", "PUBLISHED", "ARCHIVED"].map((item) => <option key={item}>{item}</option>)}</select></div></div>
-        {articles.length === 0 ? <div className="empty"><b>No articles found</b><span>Create or adjust filters.</span></div> : <div className="table-wrap"><table className="knowledge-table"><thead><tr><th>KB Article #</th><th>Title</th><th>KB Status</th><th>Updated</th></tr></thead><tbody>{articles.map((article) => <tr key={article.id}><td><button className="ticket-link" onClick={() => setSelected(article)}>{article.articleNumber}</button></td><td>{article.title}</td><td><span className={`badge ${article.status.toLowerCase()}`}>{article.status}</span></td><td>{new Date(article.updatedAt).toLocaleDateString()}</td></tr>)}</tbody></table></div>}
+        {articles.length === 0 ? <div className="empty"><b>No articles found</b><span>Create or adjust filters.</span></div> : <div className="table-wrap"><table className="knowledge-table"><thead><tr><th>KB Article #</th><th>Title</th><th>Audience</th><th>KB Status</th><th>Updated</th></tr></thead><tbody>{articles.map((article) => <tr key={article.id}><td><button className="ticket-link" onClick={() => setSelected(article)}>{article.articleNumber}</button></td><td>{article.title}</td><td>{knowledgeAudienceOptions.find((item) => item.value === article.visibility)?.label || article.visibility || "Employees"}</td><td><span className={`badge ${article.status.toLowerCase()}`}>{article.status}</span></td><td>{new Date(article.updatedAt).toLocaleDateString()}</td></tr>)}</tbody></table></div>}
         <div className="pagination-row"><button className="secondary small" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><span>Page {page} of {totalPages}</span><button className="secondary small" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next</button></div>
-        {selected && <div className="modal-backdrop"><section className="modal knowledge-modal"><div className="modal-head"><div><p className="eyebrow">{selected.articleNumber} · {selected.category} · {selected.status}</p><h2>{selected.title}</h2></div><button className="icon-button" onClick={() => setSelected(null)}>×</button></div>{selected.summary && <p className="knowledge-summary">{selected.summary}</p>}<div className="knowledge-content">{selected.content || "No content added yet."}</div>{selected.keywords && <small className="muted">Keywords: {selected.keywords}</small>}<div className="modal-actions">{canManage && <button className="secondary" onClick={() => startEdit(selected)}>Edit article</button>}<button className="primary" onClick={() => setSelected(null)}>Close</button></div></section></div>}
-        {showForm && <div className="modal-backdrop"><form className="modal record-form-modal knowledge-editor fullscreen" onSubmit={save}><div className="modal-head"><div><p className="eyebrow">{editing?.articleNumber || "New KB"}</p><h2>{editing?.id ? `Edit ${editing.articleNumber}` : "Create KB article"}</h2></div><button type="button" className="icon-button" onClick={() => { setEditing(null); setForm(emptyKnowledgeForm); }}>×</button></div><label>Title<input required minLength={3} maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus /></label><div className="form-grid"><label>Category<input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label><label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{["DRAFT", "PUBLISHED", "ARCHIVED"].map((item) => <option key={item}>{item}</option>)}</select></label></div><label>Summary<textarea rows={3} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} /></label><label>Content / Resolution Steps<textarea rows={12} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} /></label><label>Keywords / Tags<input value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} placeholder="vpn, firmware, troubleshooting" /></label>{editing?.updatedBy && <p className="muted">Last updated by {editing.updatedBy.name}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={() => { setEditing(null); setForm(emptyKnowledgeForm); }}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button></div></form></div>}
+        {selected && <div className="modal-backdrop"><section className="modal knowledge-modal"><div className="modal-head"><div><p className="eyebrow">{selected.articleNumber} · {selected.category} · {selected.status} · {knowledgeAudienceOptions.find((item) => item.value === selected.visibility)?.label || selected.visibility || "Employees"}</p><h2>{selected.title}</h2></div><button className="icon-button" onClick={() => setSelected(null)}>×</button></div>{selected.summary && <p className="knowledge-summary">{selected.summary}</p>}<div className="knowledge-content">{selected.content || "No content added yet."}</div>{selected.keywords && <small className="muted">Keywords: {selected.keywords}</small>}<div className="modal-actions">{canManage && <button className="secondary" onClick={() => startEdit(selected)}>Edit article</button>}<button className="primary" onClick={() => setSelected(null)}>Close</button></div></section></div>}
+        {showForm && <div className="modal-backdrop"><form className="modal record-form-modal knowledge-editor fullscreen" onSubmit={save}><div className="modal-head"><div><p className="eyebrow">{editing?.articleNumber || "New KB"}</p><h2>{editing?.id ? `Edit ${editing.articleNumber}` : "Create KB article"}</h2></div><button type="button" className="icon-button" onClick={() => { setEditing(null); setForm(emptyKnowledgeForm); }}>×</button></div><label>Title<input required minLength={3} maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus /></label><div className="form-grid"><label>Category<input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label><label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{["DRAFT", "PUBLISHED", "ARCHIVED"].map((item) => <option key={item}>{item}</option>)}</select></label><label>Audience<select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}>{knowledgeAudienceOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label></div><p className="muted">Only articles with Audience = Employees / Service Portal are visible in the Service Portal.</p><label>Summary<textarea rows={3} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} /></label><label>Content / Resolution Steps<textarea rows={12} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} /></label><label>Keywords / Tags<input value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} placeholder="vpn, firmware, troubleshooting" /></label>{editing?.updatedBy && <p className="muted">Last updated by {editing.updatedBy.name}</p>}<div className="modal-actions"><button type="button" className="secondary" onClick={() => { setEditing(null); setForm(emptyKnowledgeForm); }}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button></div></form></div>}
         </div>
     </section>
   );
@@ -2770,7 +2842,7 @@ function Dashboard({ session, onLogout, branding, themePreference, onThemePrefer
     localStorage.setItem(modulePreferenceKey, activeModule);
   }, [activeModule]);
   useEffect(() => {
-    if (isEmployee && (activeModule === "CMDB" || activeModule === "KNOWLEDGE")) setActiveModule("INCIDENTS");
+    if (isEmployee && ["APPROVALS", "PROBLEMS", "CHANGES", "CMDB", "KNOWLEDGE"].includes(activeModule)) setActiveModule("INCIDENTS");
   }, [isEmployee, activeModule]);
   useEffect(() => {
     if (!isEmployee)

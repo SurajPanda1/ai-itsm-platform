@@ -875,7 +875,13 @@ export default function AdminConsole({
       if (portalSettings.bannerEnabled && !portalSettings.bannerMessage.trim()) {
         throw new Error("Banner message is mandatory when banner is enabled.");
       }
-      const savedPortal = await api.updateServicePortalSettings(token, portalSettings);
+      const {
+        organizationId: _organizationId,
+        createdAt: _createdAt,
+        updatedAt: _updatedAt,
+        ...editablePortalSettings
+      } = portalSettings;
+      const savedPortal = await api.updateServicePortalSettings(token, editablePortalSettings);
       setPortalSettings({ ...defaultPortalSettings, ...savedPortal });
       setSaved("Service Portal settings saved.");
     } catch (reason) {
@@ -1999,7 +2005,7 @@ export default function AdminConsole({
           <form className="admin-grid service-portal-admin" onSubmit={savePortalSettings}>
             <div className="admin-form admin-card-menu">
               <button type="button" className="secondary active">Portal settings</button>
-              <button type="button" className="secondary" disabled>Future branding</button>
+              <p className="muted">Logo, colours, favicon and theme come from Organisation & Branding.</p>
             </div>
             <div className="settings-column">
               <div className="admin-form settings-section">
@@ -2091,10 +2097,6 @@ export default function AdminConsole({
                 <label className="check-row"><input type="checkbox" checked={portalSettings.allowEmployeeCloseTicket} onChange={(e) => setPortalSettings({ ...portalSettings, allowEmployeeCloseTicket: e.target.checked })} />Allow employees to close tickets</label>
                 <label className="check-row"><input type="checkbox" checked={portalSettings.showRecentTickets} onChange={(e) => setPortalSettings({ ...portalSettings, showRecentTickets: e.target.checked })} />Show recent tickets</label>
                 <label className="check-row"><input type="checkbox" checked={portalSettings.showMyRequests} onChange={(e) => setPortalSettings({ ...portalSettings, showMyRequests: e.target.checked })} />Show my requests</label>
-              </div>
-              <div className="admin-form settings-section future-settings">
-                <h2>Future</h2>
-                <p className="muted">Reserved for portal logo, theme, homepage widgets, announcements and FAQ. The data model is separated so these can be added without redesigning the portal.</p>
               </div>
               <button className="primary settings-save" disabled={busy}>{busy ? "Saving…" : "Save Service Portal settings"}</button>
             </div>
